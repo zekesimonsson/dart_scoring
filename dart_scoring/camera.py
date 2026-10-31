@@ -1,3 +1,4 @@
+"""Capture synchronized frames from the three board cameras."""
 
 from pathlib import Path
 import cv2
@@ -10,11 +11,25 @@ CAMERA_PATHS = {
 }
 
 
+def configure(camera):
+    """Configure a capture device for MJPG 1280x720 @ 30 fps."""
+    camera.set(
+        cv2.CAP_PROP_FOURCC,
+        cv2.VideoWriter_fourcc(*"MJPG")
+    )
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    camera.set(cv2.CAP_PROP_FPS, 30)
+
+
 class CameraManager:
+    """Opens the cameras in CAMERA_PATHS and captures frames from all of them."""
+
     def __init__(self):
         self.cameras = {}
 
     def open(self):
+        """Open and configure every camera; raise RuntimeError on failure."""
         for camera_id, device_name in CAMERA_PATHS.items():
             device_path = str(Path("/dev/v4l/by-path") / device_name)
 
@@ -24,18 +39,13 @@ class CameraManager:
                 self.close()
                 raise RuntimeError(f"Cannot open camera {camera_id}: {device_path}")
 
-            camera.set(
-                cv2.CAP_PROP_FOURCC,
-                cv2.VideoWriter_fourcc(*"MJPG")
-            )
-            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            camera.set(cv2.CAP_PROP_FPS, 30)
+            configure(camera)
 
             self.cameras[camera_id] = camera
             print(f"Camera {camera_id} opened")
 
     def capture(self):
+        """Return {camera_id: frame}, grabbing all cameras before retrieving."""
         frames = {}
 
         # Request a frame from each camera
@@ -55,6 +65,7 @@ class CameraManager:
         return frames
 
     def close(self):
+        """Release all open cameras."""
         for camera in self.cameras.values():
             camera.release()
 

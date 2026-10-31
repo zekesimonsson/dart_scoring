@@ -1,7 +1,10 @@
+"""Print scores for a few sample board points (no hardware needed)."""
+
 from dart_scoring.scoring import calculate_score
 
 
 def main():
+    """Score the hard-coded sample points and print the results."""
     print("=== Dart Scoring System ===")
 
     test_points = [

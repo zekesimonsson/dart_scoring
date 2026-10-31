@@ -1,3 +1,4 @@
+"""Dart score calculation in normalized board coordinates."""
 
 import math
 

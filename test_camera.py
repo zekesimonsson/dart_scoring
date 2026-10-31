@@ -1,20 +1,15 @@
+"""Single-camera smoke test: capture one frame from /dev/video0."""
 
 import cv2
+
+from dart_scoring.camera import configure
 
 camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
 if not camera.isOpened():
     raise RuntimeError("Could not open camera")
 
-# Configure MJPEG
-camera.set(
-    cv2.CAP_PROP_FOURCC,
-    cv2.VideoWriter_fourcc(*"MJPG")
-)
-
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-camera.set(cv2.CAP_PROP_FPS, 30)
+configure(camera)
 
 # Capture a few frames to allow auto exposure to settle
 for _ in range(15):
@@ -32,4 +27,3 @@ else:
     print("Failed to capture image")
 
 camera.release()
-

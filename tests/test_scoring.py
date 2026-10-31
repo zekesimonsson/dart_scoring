@@ -1,3 +1,7 @@
+"""Unit tests for dart_scoring.scoring.calculate_score."""
+# Test names describe the behaviour under test.
+# pylint: disable=missing-function-docstring
+
 import math
 
 import pytest

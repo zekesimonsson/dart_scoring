@@ -3,3 +3,7 @@
 # hardware scripts that open cameras at import time.
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.pylint.main]
+# cv2 is a C extension; let pylint introspect it to resolve its members.
+extension-pkg-allow-list = ["cv2"]
