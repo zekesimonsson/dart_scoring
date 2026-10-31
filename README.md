@@ -18,6 +18,11 @@ three USB cameras and OpenCV.
 ## Development status
 Initial setup completed. Waiting for cameras.
 
+## Web scoreboard
+Start with `python3 web_server.py` and open `http://<raspberry-pi-ip>:8000/`
+from any device on the network. Supports 301/501/701/101, double out,
+any number of players, manual dart entry and undo.
+
 ## Planned features
 - Camera capture and calibration
 - Dart detection

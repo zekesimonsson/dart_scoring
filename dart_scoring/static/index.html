@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dart – resultattavla</title>
+<style>
+  :root {
+    --bg: #101413;
+    --panel: #1a201e;
+    --panel-2: #232b28;
+    --line: #2f3a36;
+    --text: #eef2ef;
+    --muted: #8d9a95;
+    --green: #2fa86b;
+    --red: #d9443b;
+    --gold: #e8b931;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; cursor: pointer; border: 0; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 1.4rem; letter-spacing: .02em; }
+  .mode { color: var(--muted); font-size: .95rem; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); margin-right: 6px; vertical-align: middle; }
+  .status-dot.offline { background: var(--red); }
+
+  .banner { padding: 14px 18px; border-radius: var(--radius); font-weight: 700; font-size: 1.2rem; text-align: center; }
+  .banner.win { background: var(--gold); color: #1d1600; }
+  .banner.bust { background: var(--red); }
+  .hidden { display: none !important; }
+
+  .players { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .player { background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius);
+    padding: 14px 16px; display: grid; gap: 6px; transition: border-color .2s, transform .2s; }
+  .player.active { border-color: var(--green); transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(47, 168, 107, .18); }
+  .player.winner { border-color: var(--gold); }
+  .player .name { font-weight: 600; font-size: 1.05rem; display: flex; justify-content: space-between; gap: 8px; }
+  .player .arrow { color: var(--green); }
+  .player .remaining { font-size: clamp(2.6rem, 8vw, 4rem); font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums; }
+  .player .stats { color: var(--muted); font-size: .85rem; display: flex; gap: 12px; flex-wrap: wrap; }
+  .player .last { color: var(--muted); font-size: .85rem; min-height: 1.2em; }
+
+  .turn { background: var(--panel); border-radius: var(--radius); padding: 14px 16px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .turn .who { font-weight: 600; min-width: 120px; }
+  .darts { display: flex; gap: 8px; }
+  .dart { width: 72px; height: 52px; border-radius: 10px; background: var(--panel-2);
+    border: 1px dashed var(--line); display: grid; place-items: center; font-weight: 700; font-size: 1.1rem; }
+  .dart.filled { border-style: solid; border-color: var(--green); }
+  .turn .sum { margin-left: auto; font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  .pad { background: var(--panel); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 12px; }
+  .pad h2 { margin: 0; font-size: 1rem; color: var(--muted); font-weight: 600; }
+  .mult { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .mult button { padding: 10px; border-radius: 10px; background: var(--panel-2); font-weight: 700; }
+  .mult button.on { background: var(--green); }
+  .mult button[data-m="3"].on { background: var(--red); }
+  .numbers { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
+  .numbers button { padding: 14px 0; border-radius: 10px; background: var(--panel-2); font-weight: 700;
+    font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+  .numbers button:hover, .mult button:hover, .actions button:hover { filter: brightness(1.2); }
+  .numbers button:disabled { opacity: .3; cursor: not-allowed; }
+  .numbers .miss { background: #3a2a29; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button { padding: 10px 16px; border-radius: 10px; background: var(--panel-2); font-weight: 600; }
+  .actions .primary { background: var(--green); }
+  .error { color: var(--red); min-height: 1.2em; font-size: .9rem; }
+
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px; width: min(420px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0, 0, 0, .6); }
+  dialog h2 { margin-top: 0; }
+  dialog label { display: grid; gap: 6px; margin-bottom: 14px; font-size: .9rem; color: var(--muted); }
+  dialog textarea, dialog select { font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  dialog .check { display: flex; align-items: center; gap: 8px; color: var(--text); }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+
+  @media (max-width: 520px) {
+    .dart { width: 60px; }
+    .turn .sum { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>🎯 Dart</h1>
+      <div class="mode"><span id="dot" class="status-dot"></span><span id="mode">Ansluter…</span></div>
+    </div>
+    <div class="actions">
+      <button id="newGameBtn" class="primary">Nytt spel</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <section id="players" class="players"></section>
+
+  <section class="turn">
+    <div class="who" id="turnWho"></div>
+    <div class="darts" id="turnDarts"></div>
+    <div class="sum" id="turnSum"></div>
+  </section>
+
+  <section class="pad">
+    <h2>Mata in pil manuellt</h2>
+    <div class="mult" id="mult">
+      <button data-m="1" class="on">Singel</button>
+      <button data-m="2">Dubbel</button>
+      <button data-m="3">Trippel</button>
+    </div>
+    <div class="numbers" id="numbers"></div>
+    <div class="actions">
+      <button id="nextBtn">Nästa spelare ⏭</button>
+      <button id="undoBtn">Ångra ↶</button>
+    </div>
+    <div class="error" id="error"></div>
+  </section>
+</main>
+
+<dialog id="newGameDialog">
+  <form method="dialog" id="newGameForm">
+    <h2>Nytt spel</h2>
+    <label>Deltagare (en per rad)
+      <textarea id="playersInput" rows="4"></textarea>
+    </label>
+    <label>Spelläge
+      <select id="startScore">
+        <option value="501">501</option>
+        <option value="301">301</option>
+        <option value="701">701</option>
+        <option value="101">101</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="doubleOut" checked> Avsluta på dubbel (double out)</label>
+    <div class="row">
+      <button type="button" class="cancel" id="cancelBtn">Avbryt</button>
+      <button type="submit" class="primary" style="padding:10px 16px;border-radius:10px;background:var(--green)">Starta</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  let state = null;
+  let multiplier = 1;
+  const $ = id => document.getElementById(id);
+
+  async function api(path, body) {
+    const opts = body === undefined ? {} : {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+    const res = await fetch(path, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    return data;
+  }
+
+  async function act(path, body = {}) {
+    $("error").textContent = "";
+    try {
+      render(await api(path, body));
+    } catch (e) {
+      $("error").textContent = e.message;
+    }
+  }
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function render(s) {
+    state = s;
+    $("mode").textContent = `${s.start_score}${s.double_out ? " · double out" : ""}`;
+
+    const box = $("players");
+    box.replaceChildren();
+    s.players.forEach((p, i) => {
+      const card = el("div", "player");
+      if (s.winner === null && i === s.current) card.classList.add("active");
+      if (s.winner === i) card.classList.add("winner");
+      const name = el("div", "name");
+      name.append(el("span", "", p.name));
+      if (s.winner === i) name.append(el("span", "", "🏆"));
+      else if (s.winner === null && i === s.current) name.append(el("span", "arrow", "● kastar"));
+      card.append(name, el("div", "remaining", p.remaining));
+      const stats = el("div", "stats");
+      stats.append(el("span", "", `Snitt ${p.average.toFixed(1)}`), el("span", "", `${p.darts_thrown} pilar`));
+      card.append(stats, el("div", "last", p.last_turn.length ? `Senast: ${p.last_turn.join(" · ")}` : ""));
+      box.append(card);
+    });
+
+    const banner = $("banner");
+    if (s.winner !== null) {
+      banner.className = "banner win";
+      banner.textContent = `🏆 ${s.players[s.winner].name} vinner!`;
+    } else if (s.bust) {
+      banner.className = "banner bust";
+      banner.textContent = `BUST – ${s.players[s.current].name} går tillbaka till ${s.players[s.current].remaining}`;
+    } else {
+      banner.className = "banner hidden";
+    }
+
+    const who = s.winner !== null ? s.winner : s.current;
+    $("turnWho").textContent = s.turn_over && s.winner === null
+      ? `Tur klar: ${s.players[who].name}`
+      : s.players[who].name;
+    const darts = $("turnDarts");
+    darts.replaceChildren();
+    for (let i = 0; i < 3; i++) {
+      const d = s.turn[i];
+      darts.append(el("div", d ? "dart filled" : "dart", d ? d.label : ""));
+    }
+    $("turnSum").textContent = s.turn_points;
+
+    const over = s.winner !== null;
+    document.querySelectorAll("#numbers button").forEach(b => b.disabled = over);
+    $("nextBtn").disabled = over;
+    $("undoBtn").disabled = !s.can_undo;
+    updateBullButton();
+  }
+
+  function updateBullButton() {
+    const bull = document.querySelector("#numbers [data-seg='25']");
+    if (!bull) return;
+    bull.disabled = multiplier === 3 || (state && state.winner !== null);
+    bull.textContent = multiplier === 2 ? "Bull" : "25";
+  }
+
+  function buildPad() {
+    const nums = $("numbers");
+    for (let n = 1; n <= 20; n++) {
+      const b = el("button", "", n);
+      b.dataset.seg = n;
+      nums.append(b);
+    }
+    const bull = el("button", "", "25");
+    bull.dataset.seg = 25;
+    const miss = el("button", "miss", "Miss");
+    miss.dataset.seg = 0;
+    nums.append(bull, miss);
+
+    nums.addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (!b || b.disabled) return;
+      const seg = Number(b.dataset.seg);
+      act("/api/throw", { segment: seg, multiplier: seg === 0 ? 0 : multiplier });
+      setMultiplier(1);
+    });
+
+    $("mult").addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (b) setMultiplier(Number(b.dataset.m));
+    });
+  }
+
+  function setMultiplier(m) {
+    multiplier = m;
+    document.querySelectorAll("#mult button").forEach(b =>
+      b.classList.toggle("on", Number(b.dataset.m) === m));
+    updateBullButton();
+  }
+
+  $("nextBtn").onclick = () => act("/api/next");
+  $("undoBtn").onclick = () => act("/api/undo");
+  $("newGameBtn").onclick = () => {
+    if (state) {
+      $("playersInput").value = state.players.map(p => p.name).join("\n");
+      $("startScore").value = String(state.start_score);
+      $("doubleOut").checked = state.double_out;
+    }
+    $("newGameDialog").showModal();
+  };
+  $("cancelBtn").onclick = () => $("newGameDialog").close();
+  $("newGameForm").onsubmit = () => {
+    const players = $("playersInput").value.split("\n").map(s => s.trim()).filter(Boolean);
+    act("/api/new-game", {
+      players,
+      start_score: Number($("startScore").value),
+      double_out: $("doubleOut").checked,
+    });
+  };
+
+  async function poll() {
+    try {
+      const s = await api("/api/state");
+      $("dot").classList.remove("offline");
+      if (JSON.stringify(s) !== JSON.stringify(state)) render(s);
+    } catch {
+      $("dot").classList.add("offline");
+      $("mode").textContent = "Ingen kontakt med servern";
+    }
+  }
+
+  buildPad();
+  poll();
+  setInterval(poll, 1000);
+</script>
+</body>
+</html>
