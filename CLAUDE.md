@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Automatic dart scoring on a Raspberry Pi 4 (64-bit Raspberry Pi OS) using three InnoMaker 720p USB cameras mounted on a ring around the board, plus OpenCV 4.10 (system Python 3, no virtualenv or dependency manifest). Planned pipeline: camera capture → calibration → dart detection → score calculation → game logic → web scoreboard. Early stage: `calibration.py`, `detection.py`, `game.py` and `tests/test_scoring.py` are still empty stubs.
+Automatic dart scoring on a Raspberry Pi 4 (64-bit Raspberry Pi OS) using three InnoMaker 720p USB cameras mounted on a ring around the board, plus OpenCV 4.10 (system Python 3, no virtualenv or dependency manifest). Planned pipeline: camera capture → calibration → dart detection → score calculation → game logic → web scoreboard. Early stage: `calibration.py`, `detection.py` and `game.py` are still empty stubs.
 
 ## Commands
 
@@ -14,7 +14,12 @@ All commands run from the repo root (scripts import the `dart_scoring` package r
 - `python3 test_cameras.py` — opens all three cameras via `CameraManager`, discards 15 frames for auto-exposure, writes `images/camera_{1,2,3}.jpg`. Requires the cameras to be connected.
 - `python3 test_camera.py` — single-camera smoke test on `/dev/video0`, writes `camera_test.jpg`.
 
-The top-level `test_*.py` files are manual hardware scripts, not unit tests. pytest is not installed; unit tests belong in `tests/` (currently empty), and once pytest is installed (`pip install pytest`) a single test runs with `python3 -m pytest tests/test_scoring.py::test_name`.
+Unit tests (pytest, install with `sudo apt install python3-pytest`):
+
+- `python3 -m pytest` — runs everything in `tests/`.
+- `python3 -m pytest tests/test_scoring.py::test_cardinal_directions` — a single test.
+
+`pyproject.toml` restricts collection to `tests/` and puts the repo root on `sys.path`. The top-level `test_camera.py` / `test_cameras.py` are manual hardware scripts that open cameras at import time — never let pytest collect them.
 
 ## Architecture
 

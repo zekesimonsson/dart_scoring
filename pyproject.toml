@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Only collect real unit tests; the top-level test_*.py files are manual
+# hardware scripts that open cameras at import time.
+testpaths = ["tests"]
+pythonpath = ["."]
