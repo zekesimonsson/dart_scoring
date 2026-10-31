@@ -1,0 +1,25 @@
+# Web scoreboard as a systemd user service for the "pi" user.
+#
+# Install (no sudo needed):
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/dart-scoreboard.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now dart-scoreboard
+#   loginctl enable-linger pi     # start at boot without anyone logging in
+#
+# Logs:  journalctl --user -u dart-scoreboard -f
+
+[Unit]
+Description=Dart scoring web scoreboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/dart_scoring
+ExecStart=/usr/bin/python3 web_server.py --port 8000
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
