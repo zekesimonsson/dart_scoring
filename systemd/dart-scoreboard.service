@@ -7,7 +7,7 @@
 #   systemctl --user enable --now dart-scoreboard
 #   loginctl enable-linger pi     # start at boot without anyone logging in
 #
-# Logs:  journalctl --user -u dart-scoreboard -f
+# Logs:  tail -f ~/dart_scoring/logs/web_server.log
 
 [Unit]
 Description=Dart scoring web scoreboard
@@ -16,7 +16,7 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=%h/dart_scoring
-ExecStart=/usr/bin/python3 web_server.py --port 8000
+ExecStart=/usr/bin/python3 web_server.py --port 8000 --log-file logs/web_server.log
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
 RestartSec=3

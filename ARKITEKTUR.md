@@ -84,6 +84,7 @@ claude
 ```bash
 systemctl --user status dart-scoreboard    # körs den?
 systemctl --user restart dart-scoreboard   # efter ändringar i serverkoden
+tail -f ~/dart_scoring/logs/web_server.log # följ loggen
 ```
 
 Starta inte `python3 web_server.py` för hand samtidigt, eftersom båda vill använda port 8000.

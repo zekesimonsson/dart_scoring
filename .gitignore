@@ -12,3 +12,4 @@ captures/
 # Camera test captures
 images/
 camera_test.jpg
+logs/

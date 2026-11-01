@@ -10,6 +10,7 @@ POST /api/undo         undo the last action
 """
 
 import json
+import logging
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,8 @@ from dart_scoring.scoring import classify
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY = 64 * 1024
 
+log = logging.getLogger(__name__)
+
 
 class DartServer(ThreadingHTTPServer):
     """HTTP server holding the shared game; all access goes through `lock`."""
@@ -31,6 +34,10 @@ class DartServer(ThreadingHTTPServer):
         super().__init__(address, DartRequestHandler)
         self.lock = threading.Lock()
         self.game = game or Game(["Spelare 1", "Spelare 2"])
+
+    def handle_error(self, request, client_address):
+        """Log unexpected exceptions from request handlers."""
+        log.exception("Unhandled error while serving %s", client_address[0])
 
 
 class DartRequestHandler(BaseHTTPRequestHandler):
@@ -122,14 +129,15 @@ class DartRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # pylint: disable=redefined-builtin
         """Log everything except the once-a-second state polling."""
         if not self.path.startswith("/api/state"):
-            super().log_message(format, *args)
+            log.info("%s %s", self.address_string(), format % args)
 
 
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Run the scoreboard server until interrupted."""
     with DartServer((host, port)) as server:
-        print(f"Resultattavla på http://{host}:{port}/  (Ctrl+C avslutar)")
+        log.info("Resultattavla på http://%s:%d/", host, port)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
+        log.info("Servern stoppad")

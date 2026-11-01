@@ -6,13 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Automatic dart scoring on a Raspberry Pi 4 (64-bit Raspberry Pi OS) using three InnoMaker 720p USB cameras mounted on a ring around the board, plus OpenCV 4.10 (system Python 3, no virtualenv or dependency manifest). Planned pipeline: camera capture → calibration → dart detection → score calculation → game logic → web scoreboard. Early stage: `calibration.py` and `detection.py` are still empty stubs.
 
+The development environment (devices, Tailscale network, tmux session `dart`, GitHub over SSH, how the scoreboard is reached) is described in Swedish in [`ARKITEKTUR.md`](ARKITEKTUR.md). Keep it up to date when that setup changes.
+
 ## Commands
 
 All commands run from the repo root (scripts import the `dart_scoring` package relatively).
 
 - `python3 main.py` — runs `calculate_score` on a few hard-coded sample points (no hardware needed).
 - `python3 test_cameras.py` — opens all three cameras via `CameraManager`, discards 15 frames for auto-exposure, writes `images/camera_{1,2,3}.jpg`. Requires the cameras to be connected.
-- `python3 web_server.py [--port 8000]` — web scoreboard on http://<pi-ip>:8000/ (stdlib only, no Flask). Darts can be entered manually in the page until detection exists. On the Pi it runs as the systemd **user** service `dart-scoreboard` (unit in `systemd/`, linger enabled so it starts at boot; no sudo available). After changing server code: `systemctl --user restart dart-scoreboard`. Logs: `journalctl --user -u dart-scoreboard`. Don't also start `web_server.py` by hand on port 8000 — it will conflict.
+- `python3 web_server.py [--port 8000]` — web scoreboard on http://<pi-ip>:8000/ (stdlib only, no Flask). Darts can be entered manually in the page until detection exists. On the Pi it runs as the systemd **user** service `dart-scoreboard` (unit in `systemd/`, linger enabled so it starts at boot; no sudo available). After changing server code: `systemctl --user restart dart-scoreboard`. Logs: `logs/web_server.log` (rotated at 1 MB, 3 backups; the user journal is not persisted on this Pi, so `journalctl --user` shows nothing). Don't also start `web_server.py` by hand on port 8000 — it will conflict.
 - `python3 test_camera.py` — single-camera smoke test on `/dev/video0`, writes `camera_test.jpg`.
 
 Unit tests (pytest, install with `sudo apt install python3-pytest`):
