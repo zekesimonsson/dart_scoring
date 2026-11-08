@@ -13,3 +13,7 @@ captures/
 images/
 camera_test.jpg
 logs/
+
+# Per-setup calibration data (redo after moving a camera)
+calibration.json
+calibration.tmp
