@@ -93,6 +93,7 @@ class CalibrationRequestHandler(BaseHTTPRequestHandler):
                     "rings": [{"key": k, "label": v} for k, v in RING_LABELS.items()],
                     "boundaries": [calibration.boundary_label(b) for b in range(20)],
                     "min_points": calibration.MIN_POINTS,
+                    "min_distortion_points": calibration.MIN_DISTORTION_POINTS,
                     "calibration": self.server.data,
                 }
             self._send_json(info)
@@ -131,8 +132,9 @@ class CalibrationRequestHandler(BaseHTTPRequestHandler):
             entry = calibration.calibrate_camera(self.server.data, camera_id, points, size)
             calibration.save(self.server.data, self.server.calibration_file)
         if "rms_px" in entry:
-            log.info("Kamera %d: %d punkter, fel %.1f px / %.1f mm", camera_id,
-                     len(entry["points"]), entry["rms_px"], entry["rms_mm"])
+            log.info("Kamera %d: %d punkter, fel %.1f px / %.1f mm, %d misstänkta", camera_id,
+                     len(entry["points"]), entry["rms_px"], entry["rms_mm"],
+                     len(entry["suspects"]))
         return entry
 
     def _send_frame(self, camera_id: int, overlay: bool) -> None:
@@ -143,7 +145,7 @@ class CalibrationRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Ingen bild tagen"}, HTTPStatus.NOT_FOUND)
             return
         if overlay and "homography" in entry:
-            frame = calibration.draw_board(frame, entry["homography"])
+            frame = calibration.draw_board(frame, entry)
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
         if not ok:
             raise RuntimeError("Kunde inte koda bilden")

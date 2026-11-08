@@ -23,10 +23,13 @@
   #status.error { color:var(--bad); }
   #fit { padding:0 16px; font-weight:600; }
   ul { list-style:none; padding:0 16px; margin:8px 0 24px; }
-  li { display:flex; gap:10px; align-items:center; padding:5px 0; border-bottom:1px solid #2a2a2a; }
+  li { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:5px 0; border-bottom:1px solid #2a2a2a; }
   li.sel { color:var(--accent); }
   li .res { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
   li .res.bad { color:var(--bad); }
+  li.suspect > span:first-child { color:var(--bad); }
+  li .note { color:var(--bad); font-size:13px; }
+  li .note button { padding:2px 8px; margin-left:6px; }
   .help { padding:0 16px 16px; color:var(--muted); max-width:60em; line-height:1.45; }
 </style>
 </head>
@@ -53,8 +56,11 @@
 <div class="help">
   <p><b>Så här gör du:</b> välj ring och segmentgräns, och klicka sedan exakt där den ringens kant möter tråden mellan de två segmenten.
   Gränsen "20/1" är tråden mellan 20 och 1. Dra i en punkt för att flytta den. Zooma för att träffa bättre.</p>
-  <p>Minst 4 punkter per kamera, gärna 8–12 spridda över hela tavlan, både nära och långt bort.
-  Den gula tavlan som ritas ovanpå ska ligga på trådarna. Felet bör vara några få pixlar; punkter med stort fel är troligen felmärkta.</p>
+  <p>Minst 4 punkter per kamera, gärna 20 eller fler spridda över hela tavlan, både nära och långt bort.
+  Den gula tavlan som ritas ovanpå ska ligga på trådarna.</p>
+  <p>Från 12 punkter räknas även linsens distorsion in (vidvinkeln böjer bilden mot kanterna). Sprid då punkterna ända ut mot bildens kanter,
+  annars blir distorsionen dåligt bestämd där. Medelfelet bör vara under ca 2–3 mm. Punkter som inte passar med de övriga markeras med rött;
+  oftast är fel ring eller gräns vald, och då föreslås rätt etikett.</p>
 </div>
 
 <script>
@@ -99,9 +105,11 @@ function render() {
   const r = 7 / scale, fs = 13 / scale, sw = 2 / scale;
   const pts = points[cam];
   const entry = entries[cam] || {};
+  const suspects = new Map((entry.suspects || []).map(s => [s.index, s]));
+  const stroke = i => i === selected ? "#4cc3ff" : suspects.has(i) ? "#ff2020" : "#ff3cff";
   $("svg").innerHTML = pts.map((p, i) => `
     <g data-i="${i}">
-      <circle cx="${p.u}" cy="${p.v}" r="${r}" fill="none" stroke="${i === selected ? "#4cc3ff" : "#ff3cff"}" stroke-width="${sw}" style="cursor:move"/>
+      <circle cx="${p.u}" cy="${p.v}" r="${suspects.has(i) ? r * 1.6 : r}" fill="none" stroke="${stroke(i)}" stroke-width="${suspects.has(i) ? sw * 1.5 : sw}" style="cursor:move"/>
       <circle cx="${p.u}" cy="${p.v}" r="${sw}" fill="#ff3cff"/>
       <text x="${p.u + r * 1.3}" y="${p.v - r * 1.3}" font-size="${fs}" fill="#fff" stroke="#000" stroke-width="${sw * 1.5}" paint-order="stroke">${label(p)}</text>
     </g>`).join("");
@@ -109,14 +117,26 @@ function render() {
   $("list").innerHTML = pts.map((p, i) => {
     const e = res[i];
     const txt = e === undefined ? "" : `${e.toFixed(1)} px`;
-    return `<li class="${i === selected ? "sel" : ""}" data-i="${i}"><span>${i + 1}. ${label(p)}</span>
-      <span class="res ${e > 8 ? "bad" : ""}">${txt}</span><button data-del="${i}">Ta bort</button></li>`;
+    const s = suspects.get(i);
+    const note = !s ? "" : `<span class="note">Misstänkt: ${s.error_px.toFixed(0)} px från där ${label(p)} borde ligga.
+      ${s.suggestion ? `Troligen ${label(s.suggestion)}<button data-fix="${i}">Byt till ${label(s.suggestion)}</button>`
+                     : "Felklickad? Flytta eller ta bort den."}</span>`;
+    return `<li class="${i === selected ? "sel" : ""} ${s ? "suspect" : ""}" data-i="${i}"><span>${i + 1}. ${label(p)}</span>
+      <span class="res ${e > 8 ? "bad" : ""}">${txt}</span><button data-del="${i}">Ta bort</button>${note}</li>`;
   }).join("");
+  $("list").querySelectorAll("[data-fix]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    const i = Number(b.dataset.fix), sug = suspects.get(i).suggestion;
+    Object.assign(points[cam][i], { ring: sug.ring, boundary: sug.boundary });
+    save();
+  });
   $("list").querySelectorAll("[data-del]").forEach(b => b.onclick = ev => { ev.stopPropagation(); remove(Number(b.dataset.del)); });
   $("list").querySelectorAll("li").forEach(li => li.onclick = () => { selected = Number(li.dataset.i); render(); });
   const need = info.min_points - pts.length;
   $("fit").innerHTML = entry.rms_px !== undefined && need <= 0
-    ? `Kamera ${cam}: ${pts.length} punkter, medelfel <span style="color:${entry.rms_px < 3 ? "var(--ok)" : entry.rms_px < 8 ? "var(--warn)" : "var(--bad)"}">${entry.rms_px.toFixed(1)} px (${entry.rms_mm.toFixed(1)} mm på tavlan)</span>`
+    ? `Kamera ${cam}: ${pts.length} punkter, medelfel <span style="color:${entry.rms_mm < 2 ? "var(--ok)" : entry.rms_mm < 4 ? "var(--warn)" : "var(--bad)"}">${entry.rms_px.toFixed(1)} px (${entry.rms_mm.toFixed(1)} mm på tavlan)</span>`
+      + (entry.camera_matrix ? ", linsdistorsion inräknad" : `, utan linsdistorsion (behöver ${info.min_distortion_points} punkter)`)
+      + (suspects.size ? ` — <span style="color:var(--bad)">${suspects.size} misstänkta punkter, se listan</span>` : "")
     : `Kamera ${cam}: ${pts.length} punkter${need > 0 ? `, behöver ${need} till` : ""}`;
 }
 
