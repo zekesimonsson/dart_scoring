@@ -5,14 +5,19 @@ import cv2
 
 
 CAMERA_PATHS = {
-    1: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0",
-    2: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.0-video-index0",
-    3: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-video-index0",
+    1: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.1:1.0-video-index0",
+    2: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.2:1.0-video-index0",
+    3: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.3:1.0-video-index0",
 }
 
 
+# Fixed exposure in units of 100 µs. A multiple of 10 ms avoids banding from
+# LED flicker on 50 Hz mains and stays below the 33 ms frame time at 30 fps.
+EXPOSURE = 200
+
+
 def configure(camera):
-    """Configure a capture device for MJPG 1280x720 @ 30 fps."""
+    """Configure a capture device for MJPG 1280x720 @ 30 fps, fixed exposure."""
     camera.set(
         cv2.CAP_PROP_FOURCC,
         cv2.VideoWriter_fourcc(*"MJPG")
@@ -20,6 +25,17 @@ def configure(camera):
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     camera.set(cv2.CAP_PROP_FPS, 30)
+
+    # Auto exposure lowers the frame rate in dim light and makes brightness
+    # drift between frames, which breaks frame differencing. For the V4L2
+    # backend, 1 = manual and 3 = aperture priority (auto).
+    camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+    camera.set(cv2.CAP_PROP_EXPOSURE, EXPOSURE)
+    camera.set(cv2.CAP_PROP_GAIN, 0)
+
+    # White balance stays automatic: the manual colour temperature cannot
+    # cancel the green tint of the LED ring (the camera has no tint control).
+    camera.set(cv2.CAP_PROP_AUTO_WB, 1)
 
 
 class CameraManager:
