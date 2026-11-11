@@ -2,7 +2,8 @@
 Run dart detection: python3 detect.py [--dry-run] [--save] [--server URL].
 
 The board must be empty when it starts. Detected darts are sent to the web
-scoreboard as {"x", "y"} on /api/throw. --save writes before/after/debug
+scoreboard as {"x", "y"} on /api/throw, and a takeout to /api/takeout so
+that darts which missed the board count as misses. --save writes before/after/debug
 images and a JSON summary of every event to captures/ for tuning.
 """
 
@@ -53,16 +54,21 @@ def load_models(path: Path) -> dict[int, dict]:
     return models
 
 
-def post_throw(server: str, event: Event) -> None:
-    """Send a dart to the scoreboard."""
-    body = json.dumps({"x": event.x, "y": event.y}).encode()
-    request = urllib.request.Request(f"{server}/api/throw", body,
+def post_event(server: str, event: Event) -> None:
+    """Send a dart or a takeout to the scoreboard."""
+    if event.kind == "dart":
+        path, body = "/api/throw", {"x": event.x, "y": event.y}
+    elif event.kind == "takeout":
+        path, body = "/api/takeout", {}
+    else:
+        return
+    request = urllib.request.Request(f"{server}{path}", json.dumps(body).encode(),
                                      {"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=3) as response:
             response.read()
     except (urllib.error.URLError, OSError) as error:
-        log.warning("Kunde inte skicka pilen till resultattavlan: %s", error)
+        log.warning("Kunde inte skicka %s till resultattavlan: %s", path, error)
 
 
 def save_event(event: Event, models: dict, number: int) -> Path:
@@ -123,8 +129,8 @@ def main():
             log.info("%s", event.describe())
             if args.save:
                 log.info("Sparat i %s", save_event(event, models, number))
-            if event.kind == "dart" and not args.dry_run:
-                post_throw(args.server, event)
+            if not args.dry_run:
+                post_event(args.server, event)
     except KeyboardInterrupt:
         pass
     finally:

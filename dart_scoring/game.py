@@ -118,6 +118,21 @@ class Game:
 
         return dart
 
+    def takeout(self) -> None:
+        """
+        The darts were pulled from the board: darts of this turn that never got
+        registered (they missed the board) count as misses, so the turn is over.
+
+        Does nothing when the turn is already over or no dart was registered in it.
+        """
+        if self.winner is not None or self.turn_over or not self.turn:
+            return
+        self._save()
+        player = self.players[self.current]
+        while len(self.turn) < DARTS_PER_TURN:
+            self.turn.append(Dart(0, 0))
+            player.darts_thrown += 1
+
     def next_player(self) -> None:
         """End the current turn early (e.g. darts pulled) and move on."""
         if self.winner is not None:

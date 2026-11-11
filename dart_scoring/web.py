@@ -5,6 +5,7 @@ GET  /                 scoreboard page
 GET  /api/state        current game as JSON
 POST /api/new-game     {"players": [...], "start_score": 501, "double_out": true}
 POST /api/throw        {"segment": 20, "multiplier": 3}  or  {"x": 0.0, "y": -0.6}
+POST /api/takeout      darts pulled: fill the turn up with misses
 POST /api/next         end the current turn
 POST /api/undo         undo the last action
 """
@@ -62,6 +63,7 @@ class DartRequestHandler(BaseHTTPRequestHandler):
         actions = {
             "/api/new-game": self._new_game,
             "/api/throw": self._throw,
+            "/api/takeout": lambda _body: self.server.game.takeout(),
             "/api/next": lambda _body: self.server.game.next_player(),
             "/api/undo": lambda _body: self.server.game.undo(),
         }

@@ -35,6 +35,43 @@ def test_turn_passes_after_three_darts():
     assert game.players[1].remaining == 496
 
 
+def test_takeout_fills_the_turn_with_misses():
+    game = Game(["A", "B"])
+    game.throw(20, 1)
+    game.takeout()
+    assert game.turn_over
+    assert [d["label"] for d in game.to_dict()["turn"]] == ["20", "Miss", "Miss"]
+    assert game.players[0].darts_thrown == 3
+    game.throw(5, 1)
+    assert game.current == 1
+    assert game.players[0].last_turn == ["20", "Miss", "Miss"]
+
+
+def test_takeout_does_nothing_after_a_full_turn_or_bust_or_before_any_dart():
+    game = Game(["A", "B"])
+    game.takeout()
+    assert game.turn == []
+    assert not game.to_dict()["can_undo"]
+    for _ in range(3):
+        game.throw(20, 1)
+    game.takeout()
+    assert len(game.turn) == 3 and game.players[0].darts_thrown == 3
+
+    busted = game_at(10)
+    busted.throw(20, 1)
+    busted.takeout()
+    assert len(busted.turn) == 1 and busted.bust
+
+
+def test_takeout_can_be_undone():
+    game = Game(["A", "B"])
+    game.throw(20, 1)
+    game.takeout()
+    game.undo()
+    assert len(game.turn) == 1 and not game.turn_over
+    assert game.players[0].darts_thrown == 1
+
+
 def test_bust_below_zero_reverts_turn():
     game = game_at(40)
     game.throw(10, 1)
