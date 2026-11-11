@@ -46,6 +46,7 @@ MAX_DART_FRACTION = 0.05  # more than this of the frame: not a single dart
 MIN_ELONGATION = 2.5      # length / width of a dart blob
 REFINE_PX = 30            # keep blob pixels this close to the first line fit
 TIP_PERCENTILE = 99.5     # robust end of the blob along the line
+TIP_TRIM_PIXELS = 15      # ...but never trim more pixels than this off an end
 
 # Region where a dart can appear: the board out to this radius, plus the
 # image area above it where the shaft and flight stick out
@@ -59,6 +60,10 @@ MAX_TIP_OFFSET_MM = 40    # an intersection this far from the visible dart ends 
 # Weight of the visible lower dart ends next to the lines. Small, so it only
 # matters along nearly parallel lines, where the intersection is poorly defined.
 TIP_WEIGHT = 0.02
+# A camera's tip pulls harder the finer its view of the board is there: the
+# weight is scaled by (TIP_REFERENCE_MM_PER_PX / its mm per pixel at the tip)^2,
+# so a camera right next to the dart decides where along the lines it is.
+TIP_REFERENCE_MM_PER_PX = 0.5
 MAX_RADIUS = 1.35         # the edge of the board (451 mm); a dart further out can't stick
 
 # A dart sticks out of the board, so in the image its line must be close to
@@ -157,7 +162,11 @@ def find_dart(changed: np.ndarray) -> DartView | None:
     if direction[1] < 0:  # point down the image, towards the board
         direction = -direction
     along = (points - [x0, y0]) @ direction
-    low, high = np.percentile(along, [100 - TIP_PERCENTILE, TIP_PERCENTILE])
+    # Trim a few stray pixels off each end, but no more than TIP_TRIM_PIXELS:
+    # for a dart close to the camera a percentage would cut off the whole point
+    ordered = np.sort(along)
+    trim = min(int(len(ordered) * (100 - TIP_PERCENTILE) / 100), TIP_TRIM_PIXELS)
+    low, high = ordered[trim], ordered[-1 - trim]
     width = 2 * np.percentile(np.abs((points - [x0, y0]) @ normal), 95)
     elongation = (high - low) / max(width, 1.0)
     if elongation < MIN_ELONGATION:
@@ -232,6 +241,17 @@ class BoardLine:
     camera: int
     point: np.ndarray       # board position of the visible lower end of the dart
     direction: np.ndarray   # unit vector
+    mm_per_px: float = TIP_REFERENCE_MM_PER_PX  # coarsest board resolution at `point`
+
+
+def mm_per_pixel(model: dict, u: float, v: float, step: float = 2.0) -> float:
+    """How many mm on the board one image pixel at (u, v) covers, in its coarsest direction."""
+    here = np.array(calibration.image_to_board(model, u, v))
+    jacobian = np.column_stack([
+        np.array(calibration.image_to_board(model, u + step, v)) - here,
+        np.array(calibration.image_to_board(model, u, v + step)) - here,
+    ]) / step * calibration.BOARD_RADIUS_MM
+    return float(np.linalg.svd(jacobian, compute_uv=False)[0])
 
 
 def board_line(camera: int, model: dict, view: DartView) -> BoardLine:
@@ -242,7 +262,8 @@ def board_line(camera: int, model: dict, view: DartView) -> BoardLine:
     middle = [(a + b) / 2 for a, b in zip(view.tip, view.top)]
     direction = np.array(calibration.image_to_board(model, *middle)) - tip
     norm = np.linalg.norm(direction)
-    return BoardLine(camera, tip, direction / norm if norm > 1e-9 else np.array([0.0, 1.0]))
+    return BoardLine(camera, tip, direction / norm if norm > 1e-9 else np.array([0.0, 1.0]),
+                     mm_per_pixel(model, *view.tip))
 
 
 def intersect(lines: list[BoardLine], tip_weight: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
@@ -250,15 +271,17 @@ def intersect(lines: list[BoardLine], tip_weight: float = 0.0) -> tuple[np.ndarr
     Least-squares intersection of board lines; returns (point, distance of each line).
 
     With tip_weight > 0 the visible lower dart ends pull the point towards
-    them as well, which settles where along nearly parallel lines it lies.
+    them as well, which settles where along nearly parallel lines it lies;
+    each end pulls in proportion to how sharply its camera sees the board there.
     """
     normals = np.array([[-line.direction[1], line.direction[0]] for line in lines])
     offsets = np.array([n @ line.point for n, line in zip(normals, lines)])
     rows, values = [normals], [offsets]
     if tip_weight > 0:
-        weight = math.sqrt(tip_weight)
-        rows += [weight * np.eye(2) for _ in lines]
-        values += [weight * line.point for line in lines]
+        for line in lines:
+            weight = math.sqrt(tip_weight) * TIP_REFERENCE_MM_PER_PX / max(line.mm_per_px, 1e-3)
+            rows.append(weight * np.eye(2))
+            values.append(weight * line.point)
     point, *_ = np.linalg.lstsq(np.vstack(rows), np.concatenate(values), rcond=None)
     return point, np.abs(normals @ point - offsets)
 

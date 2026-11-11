@@ -172,6 +172,20 @@ def test_dart_tip_is_found_despite_camera_shake():
     assert view.tip == pytest.approx((640, 500), abs=8)
 
 
+def test_find_dart_keeps_the_thin_point_of_a_dart_close_to_the_camera():
+    changed = np.zeros((720, 1280), np.uint8)
+    cv2.line(changed, (600, 50), (610, 480), 255, 60)   # big barrel and flight
+    cv2.line(changed, (610, 480), (612, 560), 255, 6)   # thin steel point
+    assert find_dart(changed).tip == pytest.approx((612, 560), abs=4)
+
+
+def test_the_sharpest_camera_decides_along_parallel_lines():
+    sharp = BoardLine(1, np.array([0.0, -0.98]), np.array([0.0, 1.0]), mm_per_px=0.15)
+    coarse = BoardLine(2, np.array([0.0, -1.02]), np.array([0.0, -1.0]), mm_per_px=2.0)
+    point, _ = intersect([sharp, coarse], detection.TIP_WEIGHT)
+    assert point[1] == pytest.approx(-0.98, abs=0.002)
+
+
 def line_through(camera, point, angle_deg):
     a = math.radians(angle_deg)
     return BoardLine(camera, np.array(point, float), np.array([math.cos(a), math.sin(a)]))
