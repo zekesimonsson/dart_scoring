@@ -5,9 +5,9 @@ import cv2
 
 
 CAMERA_PATHS = {
-    1: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.1:1.0-video-index0",
-    2: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.2:1.0-video-index0",
-    3: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.3:1.0-video-index0",
+    1: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.2:1.0-video-index0",
+    2: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.3:1.0-video-index0",
+    3: "platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.4:1.0-video-index0",
 }
 
 

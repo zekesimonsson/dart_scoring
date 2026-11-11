@@ -34,7 +34,7 @@ flowchart TB
 - **OS:** Raspberry Pi OS, 64-bit (`aarch64`).
 - **Kod:** `~/dart_scoring`, den enda arbetskopian av repot. Remote: `git@github.com:zekesimonsson/dart_scoring.git` (SSH, med nyckeln `~/.ssh/id_ed25519` registrerad på GitHub).
 - **Kodagent:** Claude Code, installerat med den officiella installern i `~/.local/bin` (som ligger i `PATH` via `~/.bashrc`). Agenten körs i tmux-sessionen `dart` så att den fortsätter arbeta när ingen är ansluten.
-- **Kameror:** 3 × InnoMaker U20CAM-720P (USB/UVC, OV9732, 1280×720, 102° horisontell / 120° diagonal bildvinkel), anslutna direkt till Pi:ns USB-portar.
+- **Kameror:** 3 × InnoMaker U20CAM-720P (USB/UVC, OV9732, 1280×720, 102° horisontell / 120° diagonal bildvinkel), anslutna via en USB-hubb i Pi:ns USB 2.0-port, i hubbens portar 2–4 (kamera 1–3; port 1 används inte).
 - **Resultattavla:** webbservern (`web_server.py`) körs som systemd-användartjänsten `dart-scoreboard` på port 8000. Den startar automatiskt när Pi:n startar (linger är påslaget för `pi`) och startas om om den kraschar. Nås från alla enheter i Tailscale-nätverket på `http://dartpi:8000/` (eller `http://100.107.2.73:8000/`). Sidan har ingen inloggning, så den ska inte exponeras utanför Tailscale.
 - **Nätverk:** Tailscale, startar automatiskt (`tailscaled`), nyckelns utgångsdatum avstängt.
 
