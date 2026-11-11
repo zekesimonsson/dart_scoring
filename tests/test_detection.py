@@ -140,6 +140,38 @@ def test_find_dart_ignores_specks_away_from_the_dart():
     assert find_dart(changed).tip == pytest.approx((640, 500), abs=4)
 
 
+def wired_board():
+    """Grey image with sharp bright wires, like the board's ring and segment wires."""
+    image = np.full((720, 1280), 40, np.uint8)
+    for y in range(100, 720, 90):
+        cv2.line(image, (0, y), (1279, y + 40), 230, 3)
+    for x in range(80, 1280, 150):
+        cv2.line(image, (x, 0), (x + 60, 719), 230, 3)
+    return detection.to_gray(image)
+
+
+def shifted(image, dx, dy):
+    """The image moved by (dx, dy) pixels, repeating the edge."""
+    move = np.float32([[1, 0, dx], [0, 1, dy]])
+    return cv2.warpAffine(image, move, image.shape[::-1], borderMode=cv2.BORDER_REPLICATE)
+
+
+def test_change_mask_ignores_a_small_camera_shake():
+    before = wired_board()
+    after = shifted(before, -1, 2)
+    mask = np.full(before.shape, 255, np.uint8)
+    assert cv2.countNonZero(detection.change_mask(before, after, mask)) == 0
+
+
+def test_dart_tip_is_found_despite_camera_shake():
+    before = wired_board()
+    after = shifted(before, 2, 1)
+    cv2.line(after, (600, 200), (640, 500), 140, 7)
+    mask = np.full(before.shape, 255, np.uint8)
+    view = find_dart(detection.change_mask(before, after, mask))
+    assert view.tip == pytest.approx((640, 500), abs=8)
+
+
 def line_through(camera, point, angle_deg):
     a = math.radians(angle_deg)
     return BoardLine(camera, np.array(point, float), np.array([math.cos(a), math.sin(a)]))

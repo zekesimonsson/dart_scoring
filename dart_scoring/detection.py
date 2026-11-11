@@ -39,6 +39,7 @@ STILL_FRAMES = 3          # still frames in a row before evaluating
 
 # Change against the reference at full resolution
 CHANGE_PIXEL = 25
+SHIFT_PX = 2              # tolerated image shift (a camera shaking on impact)
 MIN_COMPONENT = 25        # ignore smaller specks
 MIN_DART_PIXELS = 150     # less than this in every camera: nothing happened
 MAX_DART_FRACTION = 0.05  # more than this of the frame: not a single dart
@@ -104,8 +105,16 @@ def board_mask(model: dict, size: tuple[int, int]) -> np.ndarray:
 
 
 def change_mask(before: np.ndarray, after: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Binary image of pixels that changed between two blurred grey frames."""
-    diff = cv2.absdiff(before, after)
+    """
+    Binary image of pixels that changed between two blurred grey frames.
+
+    A pixel only counts as changed when it is outside the range of `before`
+    within SHIFT_PX of it, so a camera that shakes by a pixel or two on impact
+    doesn't light up every edge of the board.
+    """
+    kernel = np.ones((2 * SHIFT_PX + 1, 2 * SHIFT_PX + 1), np.uint8)
+    diff = cv2.max(cv2.subtract(after, cv2.dilate(before, kernel)),
+                   cv2.subtract(cv2.erode(before, kernel), after))
     _, changed = cv2.threshold(diff, CHANGE_PIXEL, 255, cv2.THRESH_BINARY)
     changed = cv2.bitwise_and(changed, mask)
     changed = cv2.morphologyEx(changed, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
