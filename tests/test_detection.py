@@ -186,6 +186,15 @@ def test_the_sharpest_camera_decides_along_parallel_lines():
     assert point[1] == pytest.approx(-0.98, abs=0.002)
 
 
+def test_a_far_camera_seeing_only_the_top_of_a_dart_does_not_drag_the_tip_off():
+    # The close camera sees the tip in single 20; the far one only the dart's
+    # top, which maps off the board. Their lines meet near the close tip.
+    close = BoardLine(3, np.array([-0.116, -0.825]), np.array([-0.217, 0.976]), mm_per_px=0.2)
+    far = BoardLine(1, np.array([0.180, -1.216]), np.array([0.610, -0.792]), mm_per_px=2.0)
+    point, _ = locate([close, far])
+    assert classify(*point) == (20, 1)
+
+
 def line_through(camera, point, angle_deg):
     a = math.radians(angle_deg)
     return BoardLine(camera, np.array(point, float), np.array([math.cos(a), math.sin(a)]))

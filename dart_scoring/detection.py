@@ -302,7 +302,7 @@ def locate(lines: list[BoardLine]) -> tuple[np.ndarray, str]:
     """
     if not lines:
         raise ValueError("Ingen kamera såg pilen")
-    tips = np.median(np.array([line.point for line in lines]), axis=0)
+    tips = best_tip(lines)
 
     def name(group):
         return "+".join(str(line.camera) for line in group)
@@ -319,6 +319,21 @@ def locate(lines: list[BoardLine]) -> tuple[np.ndarray, str]:
         if np.linalg.norm(point - tips) * calibration.BOARD_RADIUS_MM <= MAX_TIP_OFFSET_MM:
             return point, "skärning " + name(pair)
     return tips, "spets " + name(lines)
+
+
+def best_tip(lines: list[BoardLine]) -> np.ndarray:
+    """
+    The most trustworthy visible lower dart end. With two cameras, their mean
+    weighted by 1 / (mm per pixel)^2, so the one that sees the board sharply
+    there wins (the other may only see the top of a dart far away); with three
+    or more, the end closest to the others, so a single stray one is outvoted.
+    """
+    points = np.array([line.point for line in lines])
+    if len(lines) <= 2:
+        weights = np.array([1 / max(line.mm_per_px, 1e-3) ** 2 for line in lines])
+        return weights @ points / weights.sum()
+    cost = [np.linalg.norm(points - point, axis=1).sum() for point in points]
+    return points[int(np.argmin(cost))]
 
 
 def _spread(lines: list[BoardLine]) -> float:
