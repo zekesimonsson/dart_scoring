@@ -405,6 +405,48 @@ def test_dart_off_the_board_is_unclear():
     assert detector.darts == 0
 
 
+def only_seen_by(camera, frames):
+    """Frames where only the given camera sees the change; the others show the empty board."""
+    empty = render([])
+    return {c: frames[c] if c == camera else empty[c] for c in frames}
+
+
+def test_tip_only_position_outside_the_double_ring_is_unclear():
+    # Like a hand at the edge of one camera's view: no intersection, outside the board
+    detector = new_detector()
+    event = settle(detector, only_seen_by(1, render([(-0.85, -0.65, (0, 0), 0.0)])), 1.0)
+    assert event.kind == "unclear"
+    assert detector.darts == 0
+
+
+def test_tip_only_position_inside_the_board_is_a_dart():
+    detector = new_detector()
+    event = settle(detector, only_seen_by(1, render([(0.2, -0.5, (0, 0), 0.0)])), 1.0)
+    assert event.kind == "dart"
+    assert event.method.startswith("spets")
+
+
+def test_pulling_out_an_unclear_miss_is_a_takeout():
+    # A miss left unclear is still in the board: pulling it is a takeout, not a new dart
+    detector = new_detector()
+    miss = only_seen_by(1, render([(-0.85, -0.65, (0, 0), 0.0)]))
+    assert settle(detector, miss, 1.0).kind == "unclear"
+    detector.feed(miss, 20.0)  # an idle refresh must not take it as the empty board
+    event = settle(detector, render([]), 30.0)
+    assert event.kind == "takeout"
+    event = settle(detector, render([(0.5, 0.0, (0, 0), 0.0)]), 40.0)
+    assert event.kind == "dart"
+    assert error_mm(event, 0.5, 0.0) < 2.5
+
+
+def test_miss_seen_by_several_cameras_is_still_a_dart():
+    detector = new_detector()
+    event = settle(detector, render([(-0.85, -0.65, (0, 0), 0.0)]), 1.0)
+    assert event.kind == "dart"
+    assert event.method.startswith("skärning")
+    assert event.multiplier == 0
+
+
 def test_idle_refresh_follows_the_empty_board():
     detector = new_detector()
     brighter = {c: cv2.add(f, np.full(f.shape, 30, np.uint8)) for c, f in render([]).items()}

@@ -80,6 +80,11 @@ TIP_REFERENCE_MM_PER_PX = 0.5
 SHARP_TIP_ANGLE = 20      # degrees
 SHARP_TIP_RATIO = 3
 MAX_RADIUS = 1.35         # the edge of the board (451 mm); a dart further out can't stick
+# A position from visible tips alone (no line intersection) outside the double
+# ring is not trusted: a hand or arm at the edge of a camera's view looks like
+# that, and would cost the player a dart as a miss. A real dart there scores
+# nothing anyway, and the takeout fills the turn up with misses.
+MAX_TIP_ONLY_RADIUS = 1.0
 
 # A dart sticks out of the board, so in the image its line must be close to
 # the direction the board's normal has there
@@ -507,9 +512,16 @@ class Detector:
         if max(changed.values()) < MIN_DART_PIXELS:
             self.reference = blurred
             self.reference_frames = dict(frames)
-            if self.darts == 0:  # the empty board, as it looks now
+            if not self._occupied():  # the empty board, as it looks now
                 self.empty = blurred
                 self.empty_change = 0
+
+    def _occupied(self) -> bool:
+        """
+        Something is in the board: a registered dart, or a change against the
+        empty board that stayed (e.g. a miss outside the double ring left unclear).
+        """
+        return self.darts > 0 or self.empty_change >= MIN_DART_PIXELS * len(self.models)
 
     def evaluate(self, frames: dict) -> Event:
         """Compare settled frames with the reference and classify what happened."""
@@ -530,7 +542,7 @@ class Detector:
         if max(changed.values()) < MIN_DART_PIXELS:
             event.kind = "none"
             return event
-        if self.darts and (empty_change < MIN_DART_PIXELS * len(blurred)
+        if self._occupied() and (empty_change < MIN_DART_PIXELS * len(blurred)
                            or empty_change < TAKEOUT_SHARE * self.empty_change):
             self.darts = 0
             self.empty = blurred
@@ -559,8 +571,11 @@ class Detector:
         point, method = locate(lines)
         event.lines = lines
         event.method = method
-        if np.linalg.norm(point) > MAX_RADIUS:
+        radius = np.linalg.norm(point)
+        if radius > MAX_RADIUS:
             return accept("unclear")  # nothing sticks out there
+        if method.startswith("spets") and radius > MAX_TIP_ONLY_RADIUS:
+            return accept("unclear")
         event.x, event.y = float(point[0]), float(point[1])
         event.segment, event.multiplier = classify(event.x, event.y)
         self.darts += 1
