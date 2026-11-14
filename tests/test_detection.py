@@ -172,6 +172,48 @@ def test_dart_tip_is_found_despite_camera_shake():
     assert view.tip == pytest.approx((640, 500), abs=8)
 
 
+
+def test_steel_point_over_the_green_ring_is_found_in_colour():
+    # A grey steel point as bright as the green ring behind it: invisible in
+    # grey, clear in colour, so the tip is the point and not the barrel
+    green = (40, 150, 30)
+    steel = int(round(0.114 * green[0] + 0.587 * green[1] + 0.299 * green[2]))
+    before = np.full((720, 1280, 3), 200, np.uint8)
+    cv2.rectangle(before, (0, 400), (1279, 480), green, -1)
+    after = before.copy()
+    cv2.line(after, (600, 100), (608, 400), (30, 30, 30), 24)          # barrel, above the ring
+    cv2.line(after, (608, 400), (610, 470), (steel,) * 3, 6)           # point, over the ring
+    mask = np.full((720, 1280), 255, np.uint8)
+    grey = find_dart(detection.change_mask(detection.to_gray(before), detection.to_gray(after), mask))
+    colour = find_dart(detection.change_mask(detection.to_blurred(before),
+                                             detection.to_blurred(after), mask))
+    assert grey.tip[1] < 410
+    assert colour.tip == pytest.approx((610, 470), abs=4)
+
+
+def test_extend_tip_follows_a_thin_point_across_a_wire():
+    # The shake tolerance loses a thin grey point where it crosses the edge
+    # between a white and a black segment; extend_tip follows it to the end
+    before = np.zeros((720, 1280, 3), np.uint8)
+    before[:, :640] = 220
+    after = before.copy()
+    cv2.line(after, (600, 100), (630, 400), (40, 40, 40), 20)   # barrel over the white
+    cv2.line(after, (630, 400), (635, 450), (130, 130, 130), 3)  # point over the edge
+    after, before = detection.to_blurred(after), detection.to_blurred(before)
+    short = detection.DartView(tip=(632.0, 425.0), top=(605.0, 100.0), pixels=1000, elongation=10)
+    found = detection.extend_tip(before, after, short)
+    assert found.tip[1] == pytest.approx(450, abs=4)
+    assert found.top == short.top
+
+
+def test_extend_tip_keeps_a_tip_with_nothing_beyond_it():
+    before = np.full((720, 1280, 3), 120, np.uint8)
+    after = before.copy()
+    cv2.line(after, (600, 100), (610, 400), (30, 30, 30), 12)
+    view = detection.DartView(tip=(610.0, 400.0), top=(600.0, 100.0), pixels=1000, elongation=10)
+    found = detection.extend_tip(detection.to_blurred(before), detection.to_blurred(after), view)
+    assert found.tip == pytest.approx(view.tip, abs=6)
+
 def test_find_dart_keeps_the_thin_point_of_a_dart_close_to_the_camera():
     changed = np.zeros((720, 1280), np.uint8)
     cv2.line(changed, (600, 50), (610, 480), 255, 60)   # big barrel and flight
@@ -194,6 +236,32 @@ def test_a_far_camera_seeing_only_the_top_of_a_dart_does_not_drag_the_tip_off():
     point, _ = locate([close, far])
     assert classify(*point) == (20, 1)
 
+
+def test_shallow_pair_trusts_the_sharp_camera_tip():
+    # A real dart just outside the double ring (175 mm out), seen sharply by a
+    # close camera and coarsely by a far one at a 15 degree angle. The far
+    # camera's direction is slightly off, which puts the intersection inside
+    # the ring (D7); the close camera's own tip is right.
+    sharp = BoardLine(1, np.array([-0.6694, 0.7834]), np.array([0.98294, -0.18394]), mm_per_px=0.22)
+    coarse = BoardLine(2, np.array([-1.0187, 0.7172]), np.array([-0.99648, -0.08385]), mm_per_px=1.66)
+    assert classify(*intersect([sharp, coarse], detection.TIP_WEIGHT)[0]) == (7, 2)
+    point, method = locate([sharp, coarse])
+    assert point == pytest.approx(sharp.point)
+    assert method == "spets 1"
+    assert classify(*point) == (0, 0)
+
+
+
+def test_shallow_pair_keeps_an_intersection_beyond_the_sharp_tip():
+    # Single 1, about 117 mm out. The close camera misses the thin steel point
+    # against the board, so its visible end is the barrel (105 mm, in the
+    # treble); the intersection lies beyond it along the dart and is kept.
+    sharp = BoardLine(3, np.array([0.23430, -0.57265]), np.array([0.31110, 0.95038]), mm_per_px=0.35)
+    coarse = BoardLine(2, np.array([-0.00033, -0.95352]), np.array([-0.56874, -0.82252]), mm_per_px=1.46)
+    assert classify(*sharp.point) == (1, 3)
+    point, method = locate([coarse, sharp])
+    assert method == "skärning 2+3"
+    assert classify(*point) == (1, 1)
 
 def line_through(camera, point, angle_deg):
     a = math.radians(angle_deg)

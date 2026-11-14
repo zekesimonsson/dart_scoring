@@ -47,6 +47,13 @@ MIN_ELONGATION = 2.5      # length / width of a dart blob
 REFINE_PX = 30            # keep blob pixels this close to the first line fit
 TIP_PERCENTILE = 99.5     # robust end of the blob along the line
 TIP_TRIM_PIXELS = 15      # ...but never trim more pixels than this off an end
+# The shake tolerance hides a thin steel point where it crosses a wire or a
+# colour edge, so the blob can end short of the real tip. From the blob's tip,
+# follow the line further while the plain colour difference (no tolerance)
+# stays above CHANGE_PIXEL somewhere across the strip, allowing short gaps.
+TIP_SEARCH_PX = 30
+TIP_SEARCH_GAP = 3
+TIP_SEARCH_HALF_WIDTH = 4
 
 # Region where a dart can appear: the board out to this radius, plus the
 # image area above it where the shaft and flight stick out
@@ -64,6 +71,14 @@ TIP_WEIGHT = 0.02
 # weight is scaled by (TIP_REFERENCE_MM_PER_PX / its mm per pixel at the tip)^2,
 # so a camera right next to the dart decides where along the lines it is.
 TIP_REFERENCE_MM_PER_PX = 0.5
+# Two lines meeting at a shallow angle place the point poorly along them: a
+# small direction error in the coarse camera moves it several mm. If the other
+# camera sees the board this many times sharper and the intersection lands
+# behind its visible tip (on the shaft side, where the point can't be), that
+# tip is used instead. Beyond the tip is fine: the thin steel point is often
+# invisible against the board.
+SHARP_TIP_ANGLE = 20      # degrees
+SHARP_TIP_RATIO = 3
 MAX_RADIUS = 1.35         # the edge of the board (451 mm); a dart further out can't stick
 
 # A dart sticks out of the board, so in the image its line must be close to
@@ -80,9 +95,18 @@ REFRESH_SECONDS = 10
 
 
 def to_gray(frame: np.ndarray) -> np.ndarray:
-    """Blurred greyscale image used for all comparisons."""
+    """Blurred greyscale image."""
     gray = frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return cv2.GaussianBlur(gray, (5, 5), 0)
+
+
+def to_blurred(frame: np.ndarray) -> np.ndarray:
+    """
+    Blurred colour image used for all frame comparisons. Colour, not grey: the
+    steel point over the green ring is about as bright as the green, so in grey
+    the point vanishes and the visible tip ends up at the barrel.
+    """
+    return cv2.GaussianBlur(frame, (5, 5), 0)
 
 
 def to_small(frame: np.ndarray) -> np.ndarray:
@@ -111,15 +135,19 @@ def board_mask(model: dict, size: tuple[int, int]) -> np.ndarray:
 
 def change_mask(before: np.ndarray, after: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    Binary image of pixels that changed between two blurred grey frames.
+    Binary image of pixels that changed between two blurred frames (grey or colour).
 
     A pixel only counts as changed when it is outside the range of `before`
     within SHIFT_PX of it, so a camera that shakes by a pixel or two on impact
-    doesn't light up every edge of the board.
+    doesn't light up every edge of the board. In colour, the largest change of
+    any channel counts.
     """
     kernel = np.ones((2 * SHIFT_PX + 1, 2 * SHIFT_PX + 1), np.uint8)
     diff = cv2.max(cv2.subtract(after, cv2.dilate(before, kernel)),
                    cv2.subtract(cv2.erode(before, kernel), after))
+    if diff.ndim == 3:
+        blue, green, red = cv2.split(diff)
+        diff = cv2.max(cv2.max(blue, green), red)
     _, changed = cv2.threshold(diff, CHANGE_PIXEL, 255, cv2.THRESH_BINARY)
     changed = cv2.bitwise_and(changed, mask)
     changed = cv2.morphologyEx(changed, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -176,6 +204,42 @@ def find_dart(changed: np.ndarray) -> DartView | None:
     top = origin + direction * low
     return DartView(tip=(float(tip[0]), float(tip[1])), top=(float(top[0]), float(top[1])),
                     pixels=int(len(points)), elongation=float(elongation))
+
+
+def extend_tip(before: np.ndarray, after: np.ndarray, view: DartView) -> DartView:
+    """Follow the dart line past the blob's tip to where the point really ends."""
+    tip = np.array(view.tip)
+    direction = tip - np.array(view.top)
+    direction /= max(np.linalg.norm(direction), 1e-9)
+    normal = np.array([-direction[1], direction[0]])
+    reach = TIP_SEARCH_PX + TIP_SEARCH_HALF_WIDTH + 1
+    height, width = after.shape[:2]
+    x0, y0 = max(int(tip[0]) - reach, 0), max(int(tip[1]) - reach, 0)
+    x1, y1 = min(int(tip[0]) + reach + 1, width), min(int(tip[1]) + reach + 1, height)
+    if x1 <= x0 or y1 <= y0:
+        return view
+    diff = cv2.absdiff(after[y0:y1, x0:x1], before[y0:y1, x0:x1])
+    if diff.ndim == 3:
+        blue, green, red = cv2.split(diff)
+        diff = cv2.max(cv2.max(blue, green), red)
+    across = np.arange(-TIP_SEARCH_HALF_WIDTH, TIP_SEARCH_HALF_WIDTH + 1)
+    reached, gap = 0, 0
+    for step in range(1, TIP_SEARCH_PX + 1):
+        points = tip + direction * step + np.outer(across, normal)
+        xs = np.round(points[:, 0]).astype(int) - x0
+        ys = np.round(points[:, 1]).astype(int) - y0
+        inside = (xs >= 0) & (xs < x1 - x0) & (ys >= 0) & (ys < y1 - y0)
+        if inside.any() and diff[ys[inside], xs[inside]].max() > CHANGE_PIXEL:
+            reached, gap = step, 0
+        else:
+            gap += 1
+            if gap > TIP_SEARCH_GAP:
+                break
+    if reached == 0:
+        return view
+    new_tip = tip + direction * reached
+    return DartView(tip=(float(new_tip[0]), float(new_tip[1])), top=view.top,
+                    pixels=view.pixels, elongation=view.elongation)
 
 
 def camera_pose(model: dict) -> tuple[np.ndarray, np.ndarray] | None:
@@ -297,8 +361,10 @@ def locate(lines: list[BoardLine]) -> tuple[np.ndarray, str]:
 
     All lines are intersected when they agree. Otherwise (one camera saw
     something else, or its view was blocked) each pair of lines is tried, and
-    the pair meeting closest to the visible lower ends of the darts wins. With
-    no usable intersection, the visible lower ends are used directly.
+    the pair meeting closest to the visible lower ends of the darts wins. When
+    that pair meets at a shallow angle, one camera sees much sharper and the
+    intersection is behind that camera's visible tip, the tip is used. With no usable intersection, the visible lower
+    ends are used directly.
     """
     if not lines:
         raise ValueError("Ingen kamera såg pilen")
@@ -317,6 +383,11 @@ def locate(lines: list[BoardLine]) -> tuple[np.ndarray, str]:
         candidates = [(intersect(pair, TIP_WEIGHT)[0], pair) for pair in pairs]
         point, pair = min(candidates, key=lambda c: np.linalg.norm(c[0] - tips))
         if np.linalg.norm(point - tips) * calibration.BOARD_RADIUS_MM <= MAX_TIP_OFFSET_MM:
+            sharp, coarse = sorted(pair, key=lambda line: line.mm_per_px)
+            if (_angle(*pair) < SHARP_TIP_ANGLE
+                    and coarse.mm_per_px >= SHARP_TIP_RATIO * sharp.mm_per_px
+                    and (point - sharp.point) @ sharp.direction > 0):
+                return sharp.point, "spets " + str(sharp.camera)
             return point, "skärning " + name(pair)
     return tips, "spets " + name(lines)
 
@@ -375,9 +446,9 @@ class Detector:
         self.masks = {cid: board_mask(model, image_size) for cid, model in models.items()}
         self.small_masks = {cid: cv2.resize(mask, SMALL_SIZE, interpolation=cv2.INTER_NEAREST) > 0
                             for cid, mask in self.masks.items()}
-        self.reference = None      # camera -> blurred grey, after the last event
+        self.reference = None      # camera -> blurred colour frame, after the last event
         self.reference_frames = None
-        self.empty = None          # camera -> blurred grey of the board without darts
+        self.empty = None          # camera -> blurred colour frame of the board without darts
         self.empty_change = 0      # changed pixels against `empty` after the last event
         self.previous_small = None
         self.moving = False
@@ -387,10 +458,10 @@ class Detector:
 
     def reset(self, frames: dict, now: float = 0.0) -> None:
         """Take `frames` as the empty board."""
-        grays = {cid: to_gray(frame) for cid, frame in frames.items()}
-        self.reference = grays
+        blurred = {cid: to_blurred(frame) for cid, frame in frames.items()}
+        self.reference = blurred
         self.reference_frames = dict(frames)
-        self.empty = grays
+        self.empty = blurred
         self.empty_change = 0
         self.previous_small = {cid: to_small(frame) for cid, frame in frames.items()}
         self.moving = False
@@ -430,28 +501,28 @@ class Detector:
     def _refresh(self, frames: dict, now: float) -> None:
         """Follow slow light changes while nothing happens."""
         self.last_event_time = now
-        grays = {cid: to_gray(frame) for cid, frame in frames.items()}
+        blurred = {cid: to_blurred(frame) for cid, frame in frames.items()}
         changed = {cid: cv2.countNonZero(change_mask(self.reference[cid], g, self.masks[cid]))
-                   for cid, g in grays.items()}
+                   for cid, g in blurred.items()}
         if max(changed.values()) < MIN_DART_PIXELS:
-            self.reference = grays
+            self.reference = blurred
             self.reference_frames = dict(frames)
             if self.darts == 0:  # the empty board, as it looks now
-                self.empty = grays
+                self.empty = blurred
                 self.empty_change = 0
 
     def evaluate(self, frames: dict) -> Event:
         """Compare settled frames with the reference and classify what happened."""
-        grays = {cid: to_gray(frame) for cid, frame in frames.items()}
-        changes = {cid: change_mask(self.reference[cid], g, self.masks[cid]) for cid, g in grays.items()}
+        blurred = {cid: to_blurred(frame) for cid, frame in frames.items()}
+        changes = {cid: change_mask(self.reference[cid], g, self.masks[cid]) for cid, g in blurred.items()}
         changed = {cid: cv2.countNonZero(c) for cid, c in changes.items()}
         empty_change = sum(cv2.countNonZero(change_mask(self.empty[cid], g, self.masks[cid]))
-                           for cid, g in grays.items())
+                           for cid, g in blurred.items())
         event = Event("unclear", changed=changed, before=self.reference_frames, after=dict(frames))
 
         def accept(kind: str) -> Event:
             event.kind = kind
-            self.reference = grays
+            self.reference = blurred
             self.reference_frames = dict(frames)
             self.empty_change = empty_change
             return event
@@ -459,16 +530,17 @@ class Detector:
         if max(changed.values()) < MIN_DART_PIXELS:
             event.kind = "none"
             return event
-        if self.darts and (empty_change < MIN_DART_PIXELS * len(grays)
+        if self.darts and (empty_change < MIN_DART_PIXELS * len(blurred)
                            or empty_change < TAKEOUT_SHARE * self.empty_change):
             self.darts = 0
-            self.empty = grays
+            self.empty = blurred
             return accept("takeout")
         # Fewer changes against the empty board than before: a dart was pulled out
         if self.darts and empty_change < self.empty_change - sum(changed.values()) / 2:
             self.darts = max(0, self.darts - 1)
             return accept("removed")
-        size = next(iter(grays.values())).size
+        height, width = next(iter(blurred.values())).shape[:2]
+        size = height * width
         if max(changed.values()) > MAX_DART_FRACTION * size:
             return accept("unclear")
 
@@ -479,6 +551,7 @@ class Detector:
                 view = orient(self.models[cid], view)
             if view is None:
                 continue
+            view = extend_tip(self.reference[cid], blurred[cid], view)
             event.views[cid] = view
             lines.append(board_line(cid, self.models[cid], view))
         if not lines:
@@ -497,9 +570,9 @@ class Detector:
 def draw_event(event: Event, camera: int, models: dict) -> np.ndarray:
     """Debug image for one camera: the change, the fitted line and the found tip."""
     image = event.after[camera].copy()
-    before = to_gray(event.before[camera])
-    after = to_gray(event.after[camera])
-    mask = np.full(before.shape, 255, np.uint8)
+    before = to_blurred(event.before[camera])
+    after = to_blurred(event.after[camera])
+    mask = np.full(before.shape[:2], 255, np.uint8)
     changed = change_mask(before, after, mask)
     contours, _ = cv2.findContours(changed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cv2.drawContours(image, contours, -1, (0, 0, 255), 1)
