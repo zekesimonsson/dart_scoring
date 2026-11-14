@@ -1,0 +1,30 @@
+# tmux session "dart" with Claude Code, started at boot for the "pi" user.
+# Claude Code is started with "claude -c", so it continues the latest
+# conversation in ~/dart_scoring. Quitting Claude leaves a normal shell.
+#
+# Install (no sudo needed, linger is already enabled for pi):
+#   cp systemd/dart-tmux.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable dart-tmux
+#
+# Connect: tmux attach -t dart
+#
+# Note: stopping or restarting this service kills the tmux session and
+# everything running in it (including Claude Code).
+
+[Unit]
+Description=tmux session "dart" with Claude Code
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/dart_scoring
+# tmux starts a login shell, so ~/.bashrc puts ~/.local/bin in PATH as over SSH.
+ExecStart=/usr/bin/tmux new-session -d -s dart -c %h/dart_scoring
+ExecStartPost=/usr/bin/tmux send-keys -t dart "claude -c" Enter
+ExecStop=/usr/bin/tmux kill-session -t dart
+
+[Install]
+WantedBy=default.target
