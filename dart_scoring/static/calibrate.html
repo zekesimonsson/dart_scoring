@@ -30,6 +30,12 @@
   li.suspect > span:first-child { color:var(--bad); }
   li .note { color:var(--bad); font-size:13px; }
   li .note button { padding:2px 8px; margin-left:6px; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:10px; padding:0 16px 16px; }
+  #grid figure { margin:0; cursor:pointer; }
+  #grid img { display:block; width:100%; border:1px solid #333; }
+  #grid figcaption { padding:4px 0; color:var(--muted); }
+  body.all .single { display:none; }
+  body:not(.all) #grid, body:not(.all) .allonly { display:none; }
   .help { padding:0 16px 16px; color:var(--muted); max-width:60em; line-height:1.45; }
 </style>
 </head>
@@ -38,22 +44,24 @@
   <h1>Kalibrering</h1>
   <span id="tabs"></span>
   <button id="capture">Ta nya bilder</button>
+  <label><input type="checkbox" id="overlay" checked> Visa beräknad tavla</label>
+  <label class="allonly"><input type="checkbox" id="live"> Livebild</label>
 </header>
 
-<div class="controls">
+<div class="controls single">
   <label>Ring <select id="ring"></select></label>
   <label>Gräns <select id="boundary"></select></label>
   <label><input type="checkbox" id="advance"> Nästa gräns efter klick</label>
   <label>Zoom <select id="zoom"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
-  <label><input type="checkbox" id="overlay" checked> Visa beräknad tavla</label>
 </div>
 
-<div id="fit"></div>
+<div id="fit" class="single"></div>
 <div id="status"></div>
-<div id="viewport"><div id="stage"><img id="img" alt=""><svg id="svg" viewBox="0 0 1280 720"></svg></div></div>
-<ul id="list"></ul>
+<div id="grid"></div>
+<div id="viewport" class="single"><div id="stage"><img id="img" alt=""><svg id="svg" viewBox="0 0 1280 720"></svg></div></div>
+<ul id="list" class="single"></ul>
 
-<div class="help">
+<div class="help single">
   <p><b>Så här gör du:</b> välj ring och segmentgräns, och klicka sedan exakt där den ringens kant möter tråden mellan de två segmenten.
   Gränsen "20/1" är tråden mellan 20 och 1. Dra i en punkt för att flytta den. Zooma för att träffa bättre.</p>
   <p>Minst 4 punkter per kamera, gärna 20 eller fler spridda över hela tavlan, både nära och långt bort.
@@ -82,24 +90,38 @@ async function load() {
   for (const [id, e] of Object.entries(info.calibration.cameras)) { entries[id] = e; points[id] = e.points.map(p => ({...p})); }
   $("ring").innerHTML = info.rings.map(r => `<option value="${r.key}">${r.label}</option>`).join("");
   $("boundary").innerHTML = info.boundaries.map((b, i) => `<option value="${i}">${b}</option>`).join("");
-  $("tabs").innerHTML = info.cameras.map(c => `<button data-cam="${c}">Kamera ${c}</button>`).join(" ");
-  $("tabs").querySelectorAll("button").forEach(b => b.onclick = () => select(Number(b.dataset.cam)));
-  select(info.cameras[0]);
+  $("tabs").innerHTML = `<button data-cam="all">Alla</button> `
+    + info.cameras.map(c => `<button data-cam="${c}">Kamera ${c}</button>`).join(" ");
+  $("tabs").querySelectorAll("button").forEach(b => b.onclick = () => select(b.dataset.cam === "all" ? "all" : Number(b.dataset.cam)));
+  $("grid").innerHTML = info.cameras.map(c => `<figure data-cam="${c}"><img alt="Kamera ${c}"><figcaption>Kamera ${c}</figcaption></figure>`).join("");
+  $("grid").querySelectorAll("figure").forEach(f => f.onclick = () => select(Number(f.dataset.cam)));
+  select("all");
 }
 
 function select(c) {
-  cam = c; selected = -1; points[cam] ??= [];
-  $("tabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", Number(b.dataset.cam) === cam));
+  cam = c; selected = -1;
+  document.body.classList.toggle("all", cam === "all");
+  $("tabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.cam === String(cam)));
+  if (cam !== "all") { points[cam] ??= []; if ($("live").checked) { $("live").checked = false; stopLive(); return; } }
   reloadImage(); render();
 }
 
 function reloadImage() {
+  const overlay = $("overlay").checked ? 1 : 0;
+  if (cam === "all") {
+    const live = $("live").checked;
+    $("grid").querySelectorAll("figure").forEach(f => f.querySelector("img").src = live
+      ? `/stream/${f.dataset.cam}.mjpg?overlay=${overlay}&t=${Date.now()}`
+      : `/frame/${f.dataset.cam}.jpg?overlay=${overlay}&t=${stamp}`);
+    return;
+  }
   $("img").src = `/frame/${cam}.jpg?overlay=${$("overlay").checked ? 1 : 0}&t=${stamp}`;
 }
 
 function label(p) { return p.ring === "center" ? "Mitt" : `${SHORT[p.ring]} ${info.boundaries[p.boundary]}`; }
 
 function render() {
+  if (cam === "all") return;
   $("stage").style.width = `${100 * Number($("zoom").value)}%`;
   const scale = $("svg").getBoundingClientRect().width / 1280 || 1;
   const r = 7 / scale, fs = 13 / scale, sw = 2 / scale;
@@ -180,11 +202,21 @@ $("svg").addEventListener("pointerup", ev => {
   save();
 });
 
-$("capture").onclick = async () => {
+async function capture() {
   $("capture").disabled = true; status("Tar nya bilder…");
-  try { await api("/api/capture", {}); stamp = Date.now(); reloadImage(); status("Nya bilder tagna"); }
+  try { await api("/api/capture", {}); stamp = Date.now(); reloadImage(); status(`Nya bilder tagna ${new Date().toLocaleTimeString()}`); }
   catch (e) { status(`Fel: ${e.message}`, true); }
   $("capture").disabled = false;
+}
+$("capture").onclick = capture;
+// Leaving live view: stop the streams and keep a fresh still of what was last shown
+async function stopLive() {
+  $("grid").querySelectorAll("img").forEach(img => img.removeAttribute("src"));
+  await capture();
+  render();
+}
+$("live").onchange = () => {
+  if ($("live").checked) { reloadImage(); status("Livebild"); } else stopLive();
 };
 $("overlay").onchange = reloadImage;
 $("zoom").onchange = () => { render(); requestAnimationFrame(render); };
