@@ -54,10 +54,12 @@ def load_models(path: Path) -> dict[int, dict]:
     return models
 
 
-def post_event(server: str, event: Event) -> None:
-    """Send a dart or a takeout to the scoreboard."""
+def post_event(server: str, event: Event, capture: Path | None = None) -> None:
+    """Send a dart (with the name of its saved images, if any) or a takeout to the scoreboard."""
     if event.kind == "dart":
         path, body = "/api/throw", {"x": event.x, "y": event.y}
+        if capture is not None:
+            body["capture"] = capture.name
     elif event.kind == "takeout":
         path, body = "/api/takeout", {}
     else:
@@ -127,10 +129,12 @@ def main():
                 continue
             number += 1
             log.info("%s", event.describe())
+            folder = None
             if args.save:
-                log.info("Sparat i %s", save_event(event, models, number))
+                folder = save_event(event, models, number)
+                log.info("Sparat i %s", folder)
             if not args.dry_run:
-                post_event(args.server, event)
+                post_event(args.server, event, folder)
     except KeyboardInterrupt:
         pass
     finally:

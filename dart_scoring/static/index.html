@@ -54,7 +54,13 @@
   .darts { display: flex; gap: 8px; }
   .dart { width: 72px; height: 52px; border-radius: 10px; background: var(--panel-2);
     border: 1px dashed var(--line); display: grid; place-items: center; font-weight: 700; font-size: 1.1rem; }
-  .dart.filled { border-style: solid; border-color: var(--green); }
+  .dart.filled { border-style: solid; border-color: var(--green); cursor: pointer; }
+  .dart.filled:hover { filter: brightness(1.25); }
+  .dart.fixed { border-color: var(--gold); color: var(--gold); }
+  .dart.editing { outline: 3px solid var(--gold); outline-offset: 2px; }
+  .hint { color: var(--muted); font-size: .8rem; width: 100%; }
+  .pad.correcting { outline: 2px solid var(--gold); }
+  .pad.correcting h2 { color: var(--gold); }
   .turn .sum { margin-left: auto; font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 
   .pad { background: var(--panel); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 12px; }
@@ -110,10 +116,11 @@
     <div class="who" id="turnWho"></div>
     <div class="darts" id="turnDarts"></div>
     <div class="sum" id="turnSum"></div>
+    <div class="hint">Fel värde? Klicka på pilen och välj rätt värde nedan.</div>
   </section>
 
-  <section class="pad">
-    <h2>Mata in pil manuellt</h2>
+  <section class="pad" id="pad">
+    <h2 id="padTitle">Mata in pil manuellt</h2>
     <div class="mult" id="mult">
       <button data-m="1" class="on">Singel</button>
       <button data-m="2">Dubbel</button>
@@ -123,6 +130,7 @@
     <div class="actions">
       <button id="nextBtn">Nästa spelare ⏭</button>
       <button id="undoBtn">Ångra ↶</button>
+      <button id="cancelFixBtn" class="hidden">Avbryt rättning</button>
     </div>
     <div class="error" id="error"></div>
   </section>
@@ -153,6 +161,7 @@
 <script>
   let state = null;
   let multiplier = 1;
+  let correcting = null;  // {index, key} while a dart of the turn is being corrected
   const $ = id => document.getElementById(id);
 
   async function api(path, body) {
@@ -219,25 +228,54 @@
     $("turnWho").textContent = s.turn_over && s.winner === null
       ? `Tur klar: ${s.players[who].name}`
       : s.players[who].name;
+    if (correcting && (correcting.key !== turnKey(s) || !s.turn[correcting.index])) correcting = null;
     const darts = $("turnDarts");
     darts.replaceChildren();
     for (let i = 0; i < 3; i++) {
       const d = s.turn[i];
-      darts.append(el("div", d ? "dart filled" : "dart", d ? d.label : ""));
+      const box = el(d ? "button" : "div", d ? "dart filled" : "dart", d ? d.label : "");
+      if (d) {
+        if (d.corrected) box.classList.add("fixed");
+        if (correcting && correcting.index === i) box.classList.add("editing");
+        box.title = "Rätta den här pilen";
+        box.onclick = () => startCorrecting(i);
+      }
+      darts.append(box);
     }
+    updatePadMode();
     $("turnSum").textContent = s.turn_points;
 
-    const over = s.winner !== null;
+    const over = s.winner !== null && correcting === null;
     document.querySelectorAll("#numbers button").forEach(b => b.disabled = over);
     $("nextBtn").disabled = over;
     $("undoBtn").disabled = !s.can_undo;
     updateBullButton();
   }
 
+  function turnKey(s) {
+    return `${s.current}|${s.turn.length}|${s.players[s.current].darts_thrown}`;
+  }
+
+  function startCorrecting(index) {
+    if (!state || !state.turn[index]) return;
+    correcting = correcting && correcting.index === index ? null : { index, key: turnKey(state) };
+    setMultiplier(1);
+    render(state);
+  }
+
+  function updatePadMode() {
+    const on = correcting !== null;
+    $("pad").classList.toggle("correcting", on);
+    $("padTitle").textContent = on
+      ? `Rätta pil ${correcting.index + 1} (${state.turn[correcting.index].label}) – välj rätt värde`
+      : "Mata in pil manuellt";
+    $("cancelFixBtn").classList.toggle("hidden", !on);
+  }
+
   function updateBullButton() {
     const bull = document.querySelector("#numbers [data-seg='25']");
     if (!bull) return;
-    bull.disabled = multiplier === 3 || (state && state.winner !== null);
+    bull.disabled = multiplier === 3 || (state && state.winner !== null && correcting === null);
     bull.textContent = multiplier === 2 ? "Bull" : "25";
   }
 
@@ -258,7 +296,14 @@
       const b = e.target.closest("button");
       if (!b || b.disabled) return;
       const seg = Number(b.dataset.seg);
-      act("/api/throw", { segment: seg, multiplier: seg === 0 ? 0 : multiplier });
+      const value = { segment: seg, multiplier: seg === 0 ? 0 : multiplier };
+      if (correcting) {
+        const index = correcting.index;
+        correcting = null;
+        act("/api/correct", { index, ...value });
+      } else {
+        act("/api/throw", value);
+      }
       setMultiplier(1);
     });
 
@@ -275,6 +320,7 @@
     updateBullButton();
   }
 
+  $("cancelFixBtn").onclick = () => { correcting = null; render(state); };
   $("nextBtn").onclick = () => act("/api/next");
   $("undoBtn").onclick = () => act("/api/undo");
   $("newGameBtn").onclick = () => {

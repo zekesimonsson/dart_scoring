@@ -158,3 +158,71 @@ def test_empty_player_list_is_rejected():
 ])
 def test_classify(point, expected):
     assert classify(*point) == expected
+
+
+def test_correct_recounts_the_turn():
+    game = Game(["A", "B"])
+    game.throw(1, 3)
+    game.throw(20, 1)
+    old, new = game.correct(0, 20, 1)
+    assert (old.label, new.label) == ("T1", "20")
+    assert game.players[0].remaining == 461
+    assert game.players[0].darts_thrown == 2
+    assert game.players[0].average == pytest.approx(60.0)
+    assert game.to_dict()["turn"][0]["corrected"]
+
+
+def test_correct_a_finished_turn_before_the_next_throw():
+    game = Game(["A", "B"])
+    for _ in range(3):
+        game.throw(20, 1)
+    game.correct(2, 20, 3)
+    assert game.players[0].remaining == 401
+    game.throw(5, 1)  # B's turn starts; A's corrected turn stays
+    assert game.players[0].remaining == 401
+    assert game.players[0].last_turn == ["20", "20", "T20"]
+
+
+def test_correct_into_a_bust_drops_later_darts():
+    game = game_at(40)
+    game.throw(5, 1)
+    game.throw(5, 1)
+    game.correct(0, 20, 3)  # 60 > 40: bust on the first dart
+    assert game.bust
+    assert game.players[0].remaining == 40
+    assert [d.label for d in game.turn] == ["T20"]
+
+
+def test_correct_away_from_a_bust():
+    game = game_at(40)
+    game.throw(20, 3)
+    assert game.bust
+    game.correct(0, 20, 1)
+    assert not game.bust
+    assert game.players[0].remaining == 20
+    assert game.players[0].points_scored == 20
+
+
+def test_correct_to_a_winning_double():
+    game = game_at(40)
+    game.throw(20, 1)
+    game.correct(0, 20, 2)
+    assert game.winner == 0
+    assert game.players[0].remaining == 0
+
+
+def test_correct_keeps_the_capture_and_can_be_undone():
+    game = Game(["A"])
+    game.throw(1, 3, capture="20261113-213827-026-dart")
+    game.correct(0, 20, 1)
+    assert game.turn[0].capture == "20261113-213827-026-dart"
+    assert game.undo()
+    assert game.turn[0].label == "T1" and not game.turn[0].corrected
+    assert game.players[0].remaining == 498
+
+
+def test_correct_rejects_a_missing_dart():
+    game = Game(["A"])
+    game.throw(20, 1)
+    with pytest.raises(ValueError):
+        game.correct(1, 20, 1)

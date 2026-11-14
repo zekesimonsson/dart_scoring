@@ -8,10 +8,18 @@ DARTS_PER_TURN = 3
 
 @dataclass(frozen=True)
 class Dart:
-    """One thrown dart: segment 1-20, 25 (bull) or 0 (miss), multiplier 0-3."""
+    """
+    One thrown dart: segment 1-20, 25 (bull) or 0 (miss), multiplier 0-3.
+
+    `capture` names the detector's saved images of the dart (a folder in
+    captures/), so a correction can be stored next to them; `corrected` marks
+    a dart whose value was fixed by hand.
+    """
 
     segment: int
     multiplier: int
+    capture: str | None = field(default=None, compare=False)
+    corrected: bool = field(default=False, compare=False)
 
     @property
     def points(self) -> int:
@@ -29,14 +37,15 @@ class Dart:
         return f"{prefix}{self.segment}"
 
 
-def make_dart(segment: int, multiplier: int) -> Dart:
+def make_dart(segment: int, multiplier: int, capture: str | None = None,
+              corrected: bool = False) -> Dart:
     """Validate and build a Dart; raise ValueError for impossible throws."""
     if segment == 0 or multiplier == 0:
-        return Dart(0, 0)
+        return Dart(0, 0, capture, corrected)
     if segment == 25 and multiplier in (1, 2):
-        return Dart(segment, multiplier)
+        return Dart(segment, multiplier, capture, corrected)
     if 1 <= segment <= 20 and multiplier in (1, 2, 3):
-        return Dart(segment, multiplier)
+        return Dart(segment, multiplier, capture, corrected)
     raise ValueError(f"Ogiltigt kast: segment {segment}, multiplikator {multiplier}")
 
 
@@ -90,33 +99,41 @@ class Game:
         """True when the current player has no darts left this turn."""
         return self.bust or len(self.turn) >= DARTS_PER_TURN
 
-    def throw(self, segment: int, multiplier: int) -> Dart:
+    def throw(self, segment: int, multiplier: int, capture: str | None = None) -> Dart:
         """Register a dart for the current player (advancing if their turn is over)."""
         if self.winner is not None:
             raise ValueError("Spelet är slut – starta ett nytt spel")
-        dart = make_dart(segment, multiplier)
+        dart = make_dart(segment, multiplier, capture)
 
         self._save()
         if self.turn_over:
             self._advance()
-
-        player = self.players[self.current]
-        self.turn.append(dart)
-        player.darts_thrown += 1
-        new_remaining = player.remaining - dart.points
-
-        if self._is_bust(new_remaining, dart):
-            self.bust = True
-            player.points_scored -= self.turn_start - player.remaining
-            player.remaining = self.turn_start
-        else:
-            player.remaining = new_remaining
-            player.points_scored += dart.points
-            if new_remaining == 0:
-                self.winner = self.current
-                player.last_turn = [d.label for d in self.turn]
-
+        self._apply(dart)
         return dart
+
+    def correct(self, index: int, segment: int, multiplier: int) -> tuple[Dart, Dart]:
+        """
+        Change dart `index` of the turn on display (also a finished turn, until
+        the next throw) and recount the turn. Returns (old dart, new dart).
+        """
+        if not 0 <= index < len(self.turn):
+            raise ValueError("Ingen sådan pil i turen")
+        old = self.turn[index]
+        new = make_dart(segment, multiplier, old.capture, corrected=True)
+        self._save()
+        darts = list(self.turn)
+        darts[index] = new
+        player = self.players[self.current]
+        if not self.bust:  # a bust has already given the turn's points back
+            player.points_scored -= self.turn_start - player.remaining
+        player.remaining = self.turn_start
+        player.darts_thrown -= len(darts)
+        self.turn, self.bust, self.winner = [], False, None
+        for dart in darts:
+            if self.bust or self.winner is not None:
+                break  # the corrected turn ended earlier; later darts don't count
+            self._apply(dart)
+        return old, new
 
     def takeout(self) -> None:
         """
@@ -157,7 +174,9 @@ class Game:
             "winner": self.winner,
             "bust": self.bust,
             "turn_over": self.turn_over,
-            "turn": [{"label": d.label, "points": d.points} for d in self.turn],
+            "turn": [{"label": d.label, "points": d.points, "segment": d.segment,
+                      "multiplier": d.multiplier, "detected": d.capture is not None,
+                      "corrected": d.corrected} for d in self.turn],
             "turn_points": sum(d.points for d in self.turn) if not self.bust else 0,
             "can_undo": bool(self._history),
             "players": [
@@ -171,6 +190,24 @@ class Game:
                 for p in self.players
             ],
         }
+
+    def _apply(self, dart: Dart) -> None:
+        """Add a dart to the current player's turn."""
+        player = self.players[self.current]
+        self.turn.append(dart)
+        player.darts_thrown += 1
+        new_remaining = player.remaining - dart.points
+
+        if self._is_bust(new_remaining, dart):
+            self.bust = True
+            player.points_scored -= self.turn_start - player.remaining
+            player.remaining = self.turn_start
+        else:
+            player.remaining = new_remaining
+            player.points_scored += dart.points
+            if new_remaining == 0:
+                self.winner = self.current
+                player.last_turn = [d.label for d in self.turn]
 
     def _is_bust(self, new_remaining: int, dart: Dart) -> bool:
         if new_remaining < 0:
