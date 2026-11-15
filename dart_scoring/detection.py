@@ -46,7 +46,8 @@ SHIFT_PX = 2              # tolerated image shift (a camera shaking on impact)
 EMPTY_SHIFT_PX = 6
 MIN_COMPONENT = 25        # ignore smaller specks
 MIN_DART_PIXELS = 150     # less than this in every camera: nothing happened
-MAX_DART_FRACTION = 0.05  # more than this of the frame: not a single dart
+MAX_DART_FRACTION = 0.10  # more than this of the frame: not a single dart (one right in
+                          # front of a camera, e.g. in the 20 below camera 3, covers ~5-8 %)
 MIN_ELONGATION = 2.5      # length / width of a dart blob
 REFINE_PX = 30            # keep blob pixels this close to the first line fit
 TIP_PERCENTILE = 99.5     # robust end of the blob along the line
