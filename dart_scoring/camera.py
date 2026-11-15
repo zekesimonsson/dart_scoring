@@ -19,7 +19,7 @@ EXPOSURE = 200
 # a whole camera image during play, so the board never looked like the stored
 # empty board again and takeouts were missed. The LED ring's green tint stays
 # (the camera has no tint control), which doesn't matter for detection.
-WB_TEMPERATURE = 4600
+WB_TEMPERATURE = 3050  # white segments come out neutral (blue = red) under the LED ring
 
 
 def configure(camera):
