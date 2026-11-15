@@ -22,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from dart_scoring import calibration
+from dart_scoring import calibration, tracking
 from dart_scoring.camera import CAMERA_PATHS, CameraManager
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -227,6 +227,10 @@ class CalibrationRequestHandler(BaseHTTPRequestHandler):
             frame = self.server.frames.get(camera_id)
             size = (frame.shape[1], frame.shape[0]) if frame is not None else (1280, 720)
             entry = calibration.calibrate_camera(self.server.data, camera_id, points, size)
+            if frame is not None and "homography" in entry:
+                # The image the points were clicked on: detect.py follows the board from it
+                tracking.set_reference(entry, camera_id, frame,
+                                       tracking.reference_dir(self.server.calibration_file))
             calibration.save(self.server.data, self.server.calibration_file)
         if "rms_px" in entry:
             log.info("Kamera %d: %d punkter, fel %.1f px / %.1f mm, %d misstänkta", camera_id,

@@ -17,3 +17,4 @@ logs/
 # Per-setup calibration data (redo after moving a camera)
 calibration.json
 calibration.tmp
+calibration_ref/

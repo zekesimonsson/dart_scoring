@@ -1,7 +1,9 @@
 """
 Run dart detection: python3 detect.py [--dry-run] [--save] [--server URL].
 
-The board must be empty when it starts. Detected darts are sent to the web
+The board must be empty when it starts. At start and after every takeout
+the calibration follows the board if it has turned or shifted a little
+(see dart_scoring/tracking.py). Detected darts are sent to the web
 scoreboard as {"x", "y"} on /api/throw, and a takeout to /api/takeout so
 that darts which missed the board count as misses. --save writes before/after/debug
 images and a JSON summary of every event to captures/ for tuning.
@@ -19,7 +21,7 @@ from pathlib import Path
 
 import cv2
 
-from dart_scoring import calibration
+from dart_scoring import calibration, tracking
 from dart_scoring.camera import CAMERA_PATHS, CameraManager
 from dart_scoring.detection import Detector, Event, draw_event
 
@@ -52,6 +54,32 @@ def load_models(path: Path) -> dict[int, dict]:
             log.warning("Kamera %d är kalibrerad utan linsdistorsion (för få punkter)", camera_id)
         models[camera_id] = entry
     return models
+
+
+def follow_board(models: dict[int, dict], frames: dict, calibration_file: Path) -> bool:
+    """
+    With the board empty: update the calibration of every camera that sees the
+    board moved since calibration (it turns when darts are pulled). Saves the
+    calibration file and returns True when something changed.
+    """
+    data = calibration.load(calibration_file)
+    directory = tracking.reference_dir(calibration_file)
+    changed = False
+    for camera_id, frame in frames.items():
+        entry = data["cameras"].get(str(camera_id))
+        if not entry or "homography" not in entry:
+            continue
+        result = tracking.follow(entry, camera_id, frame, directory)
+        if result.entry is None:
+            log.info("Kamera %d: tavlan %s", camera_id, result.describe())
+            continue
+        log.info("Kamera %d: tavlan %s, kalibreringen uppdaterad", camera_id, result.describe())
+        data["cameras"][str(camera_id)] = result.entry
+        models[camera_id] = result.entry
+        changed = True
+    if changed:
+        calibration.save(data, calibration_file)
+    return changed
 
 
 def post_event(server: str, event: Event, capture: Path | None = None) -> None:
@@ -112,8 +140,10 @@ def main():
     try:
         for _ in range(15):  # let the cameras settle
             cameras.capture()
+        first = cameras.capture()
+        follow_board(models, first, args.calibration)
         detector = Detector(models)
-        detector.reset(cameras.capture(), time.monotonic())
+        detector.reset(first, time.monotonic())
         log.info("Pilavkänning igång%s. Tavlan ska vara tom nu.",
                  " (torrkörning, skickar inget)" if args.dry_run else f", skickar till {args.server}")
         frames_seen, started, number = 0, time.monotonic(), 0
@@ -135,6 +165,8 @@ def main():
                 log.info("Sparat i %s", folder)
             if not args.dry_run:
                 post_event(args.server, event, folder)
+            if event.kind == "takeout" and follow_board(models, event.after, args.calibration):
+                detector.set_models(models)
     except KeyboardInterrupt:
         pass
     finally:

@@ -472,10 +472,8 @@ class Detector:
     """Turns a stream of frame sets into dart events. Feed it with `feed()`."""
 
     def __init__(self, models: dict[int, dict], image_size=(1280, 720)):
-        self.models = models
-        self.masks = {cid: board_mask(model, image_size) for cid, model in models.items()}
-        self.small_masks = {cid: cv2.resize(mask, SMALL_SIZE, interpolation=cv2.INTER_NEAREST) > 0
-                            for cid, mask in self.masks.items()}
+        self.image_size = image_size
+        self.set_models(models)
         self.reference = None      # camera -> blurred colour frame, after the last event
         self.reference_frames = None
         self.empty = None          # camera -> blurred colour frame of the board without darts
@@ -487,6 +485,13 @@ class Detector:
         self.last_event_time = 0.0
         self.darts = 0             # darts on the board since the last takeout
         self.last_dart = None      # (time, board point) of the last dart
+
+    def set_models(self, models: dict[int, dict]) -> None:
+        """Use new calibration models (e.g. after the board moved), keeping the frames."""
+        self.models = models
+        self.masks = {cid: board_mask(model, self.image_size) for cid, model in models.items()}
+        self.small_masks = {cid: cv2.resize(mask, SMALL_SIZE, interpolation=cv2.INTER_NEAREST) > 0
+                            for cid, mask in self.masks.items()}
 
     def reset(self, frames: dict, now: float = 0.0) -> None:
         """Take `frames` as the empty board."""
