@@ -151,9 +151,10 @@ def wired_board():
 
 
 def shifted(image, dx, dy):
-    """The image moved by (dx, dy) pixels, repeating the edge."""
+    """The image (grey or colour) moved by (dx, dy) pixels, repeating the edge."""
     move = np.float32([[1, 0, dx], [0, 1, dy]])
-    return cv2.warpAffine(image, move, image.shape[::-1], borderMode=cv2.BORDER_REPLICATE)
+    size = (image.shape[1], image.shape[0])
+    return cv2.warpAffine(image, move, size, borderMode=cv2.BORDER_REPLICATE)
 
 
 def test_change_mask_ignores_a_small_camera_shake():
@@ -321,7 +322,7 @@ def test_second_and_third_dart_are_found_on_their_own():
     darts = [(0.0, -0.6, (0, 0), 0.0), (0.05, -0.62, (0.1, 0), 0.0), (-0.4, 0.3, (0, 0), 0.0)]
     detector = new_detector()
     for n in range(1, 4):
-        event = settle(detector, render(darts[:n]), n)
+        event = settle(detector, render(darts[:n]), 3.0 * n)  # throws are seconds apart
         x, y = darts[n - 1][:2]
         assert event.kind == "dart"
         assert error_mm(event, x, y) < 3.5, n
@@ -338,6 +339,41 @@ def test_takeout_after_darts():
     event = settle(detector, render([(0.5, 0.0, (0, 0), 0.0)]), 4.0)
     assert event.kind == "dart"
     assert error_mm(event, 0.5, 0.0) < 2.5
+
+
+def test_takeout_after_the_board_settled_and_the_white_balance_changed():
+    # The board moves a few pixels under the first darts and the colours shift;
+    # pulling the darts must still look like the empty board again
+    def drifted(frames):
+        out = {}
+        for c, f in frames.items():
+            moved = shifted(f, 4, -3)
+            out[c] = cv2.convertScaleAbs(moved * np.float32([1.3, 1.0, 0.75]))
+        return out
+    detector = new_detector()
+    settle(detector, drifted(render([(0.1, 0.2, (0, 0), 0.0)])), 1.0)
+    settle(detector, drifted(render([(0.1, 0.2, (0, 0), 0.0), (-0.3, 0.1, (0, 0), 0.0)])), 3.0)
+    event = settle(detector, drifted(render([])), 5.0)
+    assert event.kind == "takeout"
+
+
+def test_a_settling_dart_is_not_counted_twice():
+    dart = (0.1, 0.2, (0, 0), 0.0)
+    detector = new_detector()
+    assert settle(detector, render([dart]), 1.0).kind == "dart"
+    # The same dart sagged a little, under a second later
+    event = settle(detector, render([(0.1, 0.2, (0.08, 0.0), 0.0)]), 1.5)
+    assert event.kind == "duplicate"
+    assert detector.darts == 1
+
+
+def test_a_second_dart_next_to_the_first_counts_after_a_pause():
+    detector = new_detector()
+    first = (0.1, 0.2, (0, 0), 0.0)
+    settle(detector, render([first]), 1.0)
+    event = settle(detector, render([first, (0.13, 0.2, (0, 0), 0.0)]), 4.0)
+    assert event.kind == "dart"
+    assert detector.darts == 2
 
 
 def test_pulling_out_one_dart_is_not_a_new_dart():

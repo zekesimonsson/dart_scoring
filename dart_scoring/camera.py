@@ -15,6 +15,12 @@ CAMERA_PATHS = {
 # LED flicker on 50 Hz mains and stays below the 33 ms frame time at 30 fps.
 EXPOSURE = 200
 
+# Fixed white balance (kelvin). Automatic white balance shifted the colours of
+# a whole camera image during play, so the board never looked like the stored
+# empty board again and takeouts were missed. The LED ring's green tint stays
+# (the camera has no tint control), which doesn't matter for detection.
+WB_TEMPERATURE = 4600
+
 
 def configure(camera):
     """Configure a capture device for MJPG 1280x720 @ 30 fps, fixed exposure."""
@@ -33,9 +39,9 @@ def configure(camera):
     camera.set(cv2.CAP_PROP_EXPOSURE, EXPOSURE)
     camera.set(cv2.CAP_PROP_GAIN, 0)
 
-    # White balance stays automatic: the manual colour temperature cannot
-    # cancel the green tint of the LED ring (the camera has no tint control).
-    camera.set(cv2.CAP_PROP_AUTO_WB, 1)
+    # Fixed white balance, so colours don't drift between frames (see WB_TEMPERATURE)
+    camera.set(cv2.CAP_PROP_AUTO_WB, 0)
+    camera.set(cv2.CAP_PROP_WB_TEMPERATURE, WB_TEMPERATURE)
 
 
 class CameraManager:

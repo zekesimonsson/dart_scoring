@@ -40,6 +40,10 @@ STILL_FRAMES = 3          # still frames in a row before evaluating
 # Change against the reference at full resolution
 CHANGE_PIXEL = 25
 SHIFT_PX = 2              # tolerated image shift (a camera shaking on impact)
+# Against the empty board, which can be hours old: the board settles a few
+# pixels under the first darts, and automatic white balance can shift colours,
+# so that comparison tolerates more shift and evens out each colour channel.
+EMPTY_SHIFT_PX = 6
 MIN_COMPONENT = 25        # ignore smaller specks
 MIN_DART_PIXELS = 150     # less than this in every camera: nothing happened
 MAX_DART_FRACTION = 0.05  # more than this of the frame: not a single dart
@@ -85,15 +89,20 @@ MAX_RADIUS = 1.35         # the edge of the board (451 mm); a dart further out c
 # that, and would cost the player a dart as a miss. A real dart there scores
 # nothing anyway, and the takeout fills the turn up with misses.
 MAX_TIP_ONLY_RADIUS = 1.0
+# A dart found this soon after the previous one and this close to it is the
+# same dart still settling (it wobbles after impact), not a new throw
+DUPLICATE_SECONDS = 1.5
+DUPLICATE_MM = 15
 
 # A dart sticks out of the board, so in the image its line must be close to
 # the direction the board's normal has there
 MAX_AXIS_ANGLE = 35       # degrees
 AXIS_HEIGHT = 0.2         # board radii, for computing that direction
 
-# Takeout when the change against the empty board has dropped to this share of
-# what it was with the darts in
-TAKEOUT_SHARE = 0.1
+# The board looks empty when at least this many cameras see less than
+# MIN_DART_PIXELS of change against the empty board, so one camera whose
+# colours drifted can't block a takeout on its own
+EMPTY_VOTES = 2
 
 # Refresh the reference when idle this long without any real change (slow light drift)
 REFRESH_SECONDS = 10
@@ -138,16 +147,17 @@ def board_mask(model: dict, size: tuple[int, int]) -> np.ndarray:
     return cv2.dilate(mask, kernel, anchor=(0, 0))
 
 
-def change_mask(before: np.ndarray, after: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def change_mask(before: np.ndarray, after: np.ndarray, mask: np.ndarray,
+                shift: int = SHIFT_PX) -> np.ndarray:
     """
     Binary image of pixels that changed between two blurred frames (grey or colour).
 
     A pixel only counts as changed when it is outside the range of `before`
-    within SHIFT_PX of it, so a camera that shakes by a pixel or two on impact
+    within `shift` pixels of it, so a camera that shakes by a pixel or two on impact
     doesn't light up every edge of the board. In colour, the largest change of
     any channel counts.
     """
-    kernel = np.ones((2 * SHIFT_PX + 1, 2 * SHIFT_PX + 1), np.uint8)
+    kernel = np.ones((2 * shift + 1, 2 * shift + 1), np.uint8)
     diff = cv2.max(cv2.subtract(after, cv2.dilate(before, kernel)),
                    cv2.subtract(cv2.erode(before, kernel), after))
     if diff.ndim == 3:
@@ -157,6 +167,20 @@ def change_mask(before: np.ndarray, after: np.ndarray, mask: np.ndarray) -> np.n
     changed = cv2.bitwise_and(changed, mask)
     changed = cv2.morphologyEx(changed, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     return cv2.morphologyEx(changed, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+
+
+def empty_change_mask(empty: np.ndarray, now: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """
+    `change_mask` against the stored empty board: each colour channel of `empty`
+    is scaled so its median over the board matches `now` (a white balance
+    shift), and a shift of EMPTY_SHIFT_PX is tolerated (the board settles).
+    """
+    inside = mask > 0
+    if empty.ndim == 3:
+        gains = [np.median(now[..., k][inside]) / max(np.median(empty[..., k][inside]), 1.0)
+                 for k in range(3)]
+        empty = np.clip(empty.astype(np.float32) * np.float32(gains), 0, 255).astype(np.uint8)
+    return change_mask(empty, now, mask, EMPTY_SHIFT_PX)
 
 
 @dataclass
@@ -420,7 +444,7 @@ def _spread(lines: list[BoardLine]) -> float:
 class Event:
     """Something the detector found: a dart, a takeout, or an unclear change."""
 
-    kind: str                                   # "dart", "takeout", "removed" or "unclear"
+    kind: str                                   # "dart", "takeout", "removed", "duplicate" or "unclear"
     x: float | None = None
     y: float | None = None
     segment: int | None = None
@@ -455,11 +479,13 @@ class Detector:
         self.reference_frames = None
         self.empty = None          # camera -> blurred colour frame of the board without darts
         self.empty_change = 0      # changed pixels against `empty` after the last event
+        self.leftover = False      # some camera still saw a change against `empty` at the last event
         self.previous_small = None
         self.moving = False
         self.still = 0
         self.last_event_time = 0.0
         self.darts = 0             # darts on the board since the last takeout
+        self.last_dart = None      # (time, board point) of the last dart
 
     def reset(self, frames: dict, now: float = 0.0) -> None:
         """Take `frames` as the empty board."""
@@ -468,11 +494,13 @@ class Detector:
         self.reference_frames = dict(frames)
         self.empty = blurred
         self.empty_change = 0
+        self.leftover = False
         self.previous_small = {cid: to_small(frame) for cid, frame in frames.items()}
         self.moving = False
         self.still = 0
         self.last_event_time = now
         self.darts = 0
+        self.last_dart = None
 
     def feed(self, frames: dict, now: float) -> Event | None:
         """Process one set of frames; return an event when the view has settled after motion."""
@@ -515,21 +543,24 @@ class Detector:
             if not self._occupied():  # the empty board, as it looks now
                 self.empty = blurred
                 self.empty_change = 0
+                self.leftover = False
 
     def _occupied(self) -> bool:
         """
         Something is in the board: a registered dart, or a change against the
         empty board that stayed (e.g. a miss outside the double ring left unclear).
         """
-        return self.darts > 0 or self.empty_change >= MIN_DART_PIXELS * len(self.models)
+        return self.darts > 0 or self.leftover
 
     def evaluate(self, frames: dict) -> Event:
         """Compare settled frames with the reference and classify what happened."""
         blurred = {cid: to_blurred(frame) for cid, frame in frames.items()}
         changes = {cid: change_mask(self.reference[cid], g, self.masks[cid]) for cid, g in blurred.items()}
         changed = {cid: cv2.countNonZero(c) for cid, c in changes.items()}
-        empty_change = sum(cv2.countNonZero(change_mask(self.empty[cid], g, self.masks[cid]))
-                           for cid, g in blurred.items())
+        empty_counts = [cv2.countNonZero(empty_change_mask(self.empty[cid], g, self.masks[cid]))
+                        for cid, g in blurred.items()]
+        empty_change = sum(empty_counts)
+        looks_empty = sum(n < MIN_DART_PIXELS for n in empty_counts) >= min(EMPTY_VOTES, len(blurred))
         event = Event("unclear", changed=changed, before=self.reference_frames, after=dict(frames))
 
         def accept(kind: str) -> Event:
@@ -537,13 +568,13 @@ class Detector:
             self.reference = blurred
             self.reference_frames = dict(frames)
             self.empty_change = empty_change
+            self.leftover = max(empty_counts) >= MIN_DART_PIXELS
             return event
 
         if max(changed.values()) < MIN_DART_PIXELS:
             event.kind = "none"
             return event
-        if self._occupied() and (empty_change < MIN_DART_PIXELS * len(blurred)
-                           or empty_change < TAKEOUT_SHARE * self.empty_change):
+        if self._occupied() and looks_empty:
             self.darts = 0
             self.empty = blurred
             return accept("takeout")
@@ -576,6 +607,12 @@ class Detector:
             return accept("unclear")  # nothing sticks out there
         if method.startswith("spets") and radius > MAX_TIP_ONLY_RADIUS:
             return accept("unclear")
+        now = self.last_event_time
+        if (self.last_dart is not None and now - self.last_dart[0] < DUPLICATE_SECONDS
+                and np.linalg.norm(point - self.last_dart[1]) * calibration.BOARD_RADIUS_MM
+                < DUPLICATE_MM):
+            return accept("duplicate")
+        self.last_dart = (now, point)
         event.x, event.y = float(point[0]), float(point[1])
         event.segment, event.multiplier = classify(event.x, event.y)
         self.darts += 1
