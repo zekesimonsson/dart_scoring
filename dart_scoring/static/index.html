@@ -100,6 +100,9 @@
     border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
   dialog .check { display: flex; align-items: center; gap: 8px; color: var(--text); }
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+  dialog .row button { padding: 10px 16px; border-radius: 10px; background: var(--panel-2); font-weight: 600; }
+  dialog .row button.primary { background: var(--green); }
+  dialog .row button:hover { filter: brightness(1.2); }
 
   @media (max-width: 520px) {
     .dart { width: 60px; }
@@ -180,7 +183,7 @@
     </label>
     <div class="row">
       <button type="button" class="cancel" id="cancelBtn">Avbryt</button>
-      <button type="submit" class="primary" style="padding:10px 16px;border-radius:10px;background:var(--green)">Starta</button>
+      <button type="submit" class="primary">Starta</button>
     </div>
   </form>
 </dialog>
