@@ -47,6 +47,17 @@
     font-variant-numeric: tabular-nums; }
   .player .stats { color: var(--muted); font-size: .85rem; display: flex; gap: 12px; flex-wrap: wrap; }
   .player .last { color: var(--muted); font-size: .85rem; min-height: 1.2em; }
+  .player .caption { color: var(--muted); font-size: 1.05rem; min-height: 1.2em; letter-spacing: .08em; }
+  .player.out { opacity: .4; }
+  .player .badge { background: var(--red); color: #fff; border-radius: 6px; padding: 0 6px; font-size: .75rem; font-weight: 700; }
+  .marks { display: flex; gap: 4px; flex-wrap: wrap; }
+  .mark { background: var(--panel-2); border-radius: 6px; padding: 2px 6px; font-size: .8rem;
+    font-variant-numeric: tabular-nums; min-width: 44px; text-align: center; }
+  .mark b { margin-left: 4px; }
+  .mark.closed { background: var(--green); color: #04150c; }
+  .banner.note { background: var(--panel-2); }
+  .numbers button.target { box-shadow: inset 0 0 0 2px var(--gold); }
+  dialog .desc { color: var(--muted); font-size: .85rem; margin: -6px 0 14px; }
 
   .turn { background: var(--panel); border-radius: var(--radius); padding: 14px 16px;
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -142,7 +153,17 @@
     <label>Deltagare (en per rad)
       <textarea id="playersInput" rows="4"></textarea>
     </label>
-    <label>Spelläge
+    <label>Spel
+      <select id="gameKind">
+        <option value="x01">X01 (501, 301 …)</option>
+        <option value="cricket">Cricket</option>
+        <option value="killer">Killer</option>
+        <option value="shanghai">Shanghai</option>
+        <option value="around_the_clock">Around the Clock</option>
+      </select>
+    </label>
+    <p class="desc" id="gameDesc"></p>
+    <label data-for="x01">Startpoäng
       <select id="startScore">
         <option value="501">501</option>
         <option value="301">301</option>
@@ -150,7 +171,13 @@
         <option value="101">101</option>
       </select>
     </label>
-    <label class="check"><input type="checkbox" id="doubleOut" checked> Avsluta på dubbel (double out)</label>
+    <label class="check" data-for="x01"><input type="checkbox" id="doubleOut" checked> Avsluta på dubbel (double out)</label>
+    <label data-for="killer">Liv
+      <select id="lives">
+        <option value="3">3</option>
+        <option value="5">5</option>
+      </select>
+    </label>
     <div class="row">
       <button type="button" class="cancel" id="cancelBtn">Avbryt</button>
       <button type="submit" class="primary" style="padding:10px 16px;border-radius:10px;background:var(--green)">Starta</button>
@@ -192,40 +219,57 @@
     return e;
   }
 
+  const MARK_SYMBOLS = ["", "/", "✕", "Ⓧ"];
+
   function render(s) {
     state = s;
-    $("mode").textContent = `${s.start_score}${s.double_out ? " · double out" : ""}`;
+    $("mode").textContent = s.title;
+    const finished = s.winners.length > 0;
 
     const box = $("players");
     box.replaceChildren();
     s.players.forEach((p, i) => {
       const card = el("div", "player");
-      if (s.winner === null && i === s.current) card.classList.add("active");
-      if (s.winner === i) card.classList.add("winner");
+      if (!finished && i === s.current) card.classList.add("active");
+      if (s.winners.includes(i)) card.classList.add("winner");
+      if (p.out) card.classList.add("out");
       const name = el("div", "name");
       name.append(el("span", "", p.name));
-      if (s.winner === i) name.append(el("span", "", "🏆"));
-      else if (s.winner === null && i === s.current) name.append(el("span", "arrow", "● kastar"));
-      card.append(name, el("div", "remaining", p.remaining));
+      if (s.winners.includes(i)) name.append(el("span", "", "🏆"));
+      else if (!finished && i === s.current) name.append(el("span", "arrow", "● kastar"));
+      else if (p.killer) name.append(el("span", "badge", "KILLER"));
+      card.append(name, el("div", "remaining", p.big));
+      if (p.caption) card.append(el("div", "caption", p.caption));
+      if (p.marks) {
+        const marks = el("div", "marks");
+        p.marks.forEach(m => {
+          const chip = el("span", m.marks >= 3 ? "mark closed" : "mark", m.label);
+          chip.append(el("b", "", MARK_SYMBOLS[Math.min(m.marks, 3)]));
+          marks.append(chip);
+        });
+        card.append(marks);
+      }
       const stats = el("div", "stats");
-      stats.append(el("span", "", `Snitt ${p.average.toFixed(1)}`), el("span", "", `${p.darts_thrown} pilar`));
+      p.stats.forEach(t => stats.append(el("span", "", t)));
       card.append(stats, el("div", "last", p.last_turn.length ? `Senast: ${p.last_turn.join(" · ")}` : ""));
       box.append(card);
     });
 
     const banner = $("banner");
-    if (s.winner !== null) {
+    if (finished) {
       banner.className = "banner win";
-      banner.textContent = `🏆 ${s.players[s.winner].name} vinner!`;
-    } else if (s.bust) {
-      banner.className = "banner bust";
-      banner.textContent = `BUST – ${s.players[s.current].name} går tillbaka till ${s.players[s.current].remaining}`;
+      const names = s.winners.map(i => s.players[i].name).join(" och ");
+      banner.textContent = `🏆 ${names} ${s.winners.length > 1 ? "delar segern" : "vinner"}!`
+        + (s.message ? ` – ${s.message}` : "");
+    } else if (s.message) {
+      banner.className = s.bust ? "banner bust" : "banner note";
+      banner.textContent = s.message;
     } else {
       banner.className = "banner hidden";
     }
 
-    const who = s.winner !== null ? s.winner : s.current;
-    $("turnWho").textContent = s.turn_over && s.winner === null
+    const who = finished ? s.winners[0] : s.current;
+    $("turnWho").textContent = s.turn_over && !finished
       ? `Tur klar: ${s.players[who].name}`
       : s.players[who].name;
     if (correcting && (correcting.key !== turnKey(s) || !s.turn[correcting.index])) correcting = null;
@@ -243,10 +287,13 @@
       darts.append(box);
     }
     updatePadMode();
-    $("turnSum").textContent = s.turn_points;
+    $("turnSum").textContent = s.turn_summary;
 
-    const over = s.winner !== null && correcting === null;
-    document.querySelectorAll("#numbers button").forEach(b => b.disabled = over);
+    const over = finished && correcting === null;
+    document.querySelectorAll("#numbers button").forEach(b => {
+      b.disabled = over;
+      b.classList.toggle("target", !correcting && s.highlight.includes(Number(b.dataset.seg)));
+    });
     $("nextBtn").disabled = over;
     $("undoBtn").disabled = !s.can_undo;
     updateBullButton();
@@ -275,7 +322,7 @@
   function updateBullButton() {
     const bull = document.querySelector("#numbers [data-seg='25']");
     if (!bull) return;
-    bull.disabled = multiplier === 3 || (state && state.winner !== null && correcting === null);
+    bull.disabled = multiplier === 3 || (state && state.winners.length > 0 && correcting === null);
     bull.textContent = multiplier === 2 ? "Bull" : "25";
   }
 
@@ -323,21 +370,43 @@
   $("cancelFixBtn").onclick = () => { correcting = null; render(state); };
   $("nextBtn").onclick = () => act("/api/next");
   $("undoBtn").onclick = () => act("/api/undo");
+  const GAME_DESCRIPTIONS = {
+    x01: "Räkna ner till exakt 0.",
+    cricket: "Stäng 20–15 och bull med tre märken var. Extra märken på stängda nummer ger poäng så länge någon motståndare har numret öppet.",
+    killer: "Alla får ett slumpat nummer. Träffa ditt nummer för att bli killer, och ta sedan liv från de andra genom att träffa deras nummer (singel 1, dubbel 2, trippel 3). Träffar en killer sitt eget nummer förlorar den liv. Sist kvar vinner.",
+    shanghai: "Sju rundor, i runda N räknas bara N. Singel, dubbel och trippel i samma tur (Shanghai) vinner direkt.",
+    around_the_clock: "Träffa 1, 2, 3 … 20 och sist bull, i ordning. Först runt vinner.",
+  };
+
+  function updateGameOptions() {
+    const kind = $("gameKind").value;
+    $("gameDesc").textContent = GAME_DESCRIPTIONS[kind];
+    document.querySelectorAll("#newGameForm [data-for]").forEach(e =>
+      e.classList.toggle("hidden", e.dataset.for !== kind));
+  }
+  $("gameKind").onchange = updateGameOptions;
+
   $("newGameBtn").onclick = () => {
     if (state) {
       $("playersInput").value = state.players.map(p => p.name).join("\n");
-      $("startScore").value = String(state.start_score);
-      $("doubleOut").checked = state.double_out;
+      $("gameKind").value = state.game;
+      if (state.game === "x01") {
+        $("startScore").value = String(state.start_score);
+        $("doubleOut").checked = state.double_out;
+      }
     }
+    updateGameOptions();
     $("newGameDialog").showModal();
   };
   $("cancelBtn").onclick = () => $("newGameDialog").close();
   $("newGameForm").onsubmit = () => {
     const players = $("playersInput").value.split("\n").map(s => s.trim()).filter(Boolean);
     act("/api/new-game", {
+      game: $("gameKind").value,
       players,
       start_score: Number($("startScore").value),
       double_out: $("doubleOut").checked,
+      lives: Number($("lives").value),
     });
   };
 

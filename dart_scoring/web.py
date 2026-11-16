@@ -3,7 +3,8 @@ Web scoreboard: a small HTTP server (standard library only) with a JSON API.
 
 GET  /                 scoreboard page
 GET  /api/state        current game as JSON
-POST /api/new-game     {"players": [...], "start_score": 501, "double_out": true}
+POST /api/new-game     {"game": "x01", "players": [...], "start_score": 501, "double_out": true};
+                       game is x01, cricket, around_the_clock, shanghai or killer ("lives": 3)
 POST /api/throw        {"segment": 20, "multiplier": 3}  or  {"x": 0.0, "y": -0.6},
                        optionally with "capture": the detector's saved images of the dart
 POST /api/correct      {"index": 1, "segment": 20, "multiplier": 1}: fix a dart of the
@@ -23,7 +24,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from dart_scoring.game import Game
+from dart_scoring.game import Game, TurnGame
+from dart_scoring.games import new_game
 from dart_scoring.scoring import classify
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -39,7 +41,7 @@ class DartServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, address, game: Game | None = None, capture_dir: Path = CAPTURE_DIR):
+    def __init__(self, address, game: TurnGame | None = None, capture_dir: Path = CAPTURE_DIR):
         super().__init__(address, DartRequestHandler)
         self.lock = threading.Lock()
         self.game = game or Game(["Spelare 1", "Spelare 2"])
@@ -96,11 +98,8 @@ class DartRequestHandler(BaseHTTPRequestHandler):
         players = body.get("players", [])
         if not isinstance(players, list):
             raise ValueError("players måste vara en lista")
-        self.server.game = Game(
-            [str(name) for name in players],
-            start_score=int(body.get("start_score", 501)),
-            double_out=bool(body.get("double_out", True)),
-        )
+        self.server.game = new_game(str(body.get("game", "x01")),
+                                    [str(name) for name in players], body)
 
     def _throw(self, body: dict) -> None:
         if "x" in body and "y" in body:
