@@ -1,9 +1,10 @@
 """
 Run dart detection: python3 detect.py [--dry-run] [--save] [--server URL].
 
-The board must be empty when it starts. At start and after every takeout
-the calibration follows the board if it has turned or shifted a little
-(see dart_scoring/tracking.py). Detected darts are sent to the web
+The board must be empty when it starts. At start and after every event
+that isn't a dart (takeout, dart pulled, someone at the board) the
+calibration follows the board if it has turned or shifted a little (see
+dart_scoring/tracking.py). Detected darts are sent to the web
 scoreboard as {"x", "y"} on /api/throw, and a takeout to /api/takeout so
 that darts which missed the board count as misses. --save writes before/after/debug
 images and a JSON summary of every event to captures/ for tuning.
@@ -165,8 +166,16 @@ def main():
                 log.info("Sparat i %s", folder)
             if not args.dry_run:
                 post_event(args.server, event, folder)
-            if event.kind == "takeout" and follow_board(models, event.after, args.calibration):
-                detector.set_models(models)
+            if event.kind != "dart" and follow_board(models, event.after, args.calibration):
+                # The board turned: move the stored empty board along (unless it was just
+                # taken), and the pulled darts may now turn out to be a takeout
+                detector.set_models(models, move_empty=event.kind != "takeout")
+                takeout = detector.check_takeout(event.after)
+                if takeout is not None:
+                    number += 1
+                    log.info("%s (efter att tavlan vridits)", takeout.describe())
+                    if not args.dry_run:
+                        post_event(args.server, takeout)
     except KeyboardInterrupt:
         pass
     finally:

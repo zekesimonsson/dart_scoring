@@ -34,6 +34,8 @@ MAX_RESIDUAL_PX = 1.5   # median error of the matched features after the fit
 RANSAC_PX = 1.5
 MIN_UPDATE_PX = 1.0     # smaller movements are left alone
 CHECK_RADIUS = 1.0      # movement is measured over the board out to the double ring
+BOARD_EDGE = 1.33       # board radii (451 mm board): outside it nothing turns with the board
+EDGE_MARGIN_PX = 4      # moved board this close to the image edge counts as unknown
 
 
 def reference_dir(calibration_file: Path) -> Path:
@@ -99,6 +101,42 @@ def model_shift(a: dict, b: dict, size: tuple[int, int]) -> float:
     if not inside.any():
         return 0.0
     return float(np.median(np.linalg.norm(pa[inside] - pb[inside], axis=1)))
+
+
+def remap(image: np.ndarray, old: dict, new: dict, step: int = 8) -> tuple[np.ndarray, np.ndarray]:
+    """
+    `image`, seen with the `old` calibration, as it looks with the `new` one:
+    every pixel shows the board point the new model puts there. Used to move
+    the stored empty board along when the board has turned. Outside the board
+    (LED ring, wall) nothing moved, so those pixels are kept. Also returns a
+    mask (255) of the pixels that are known: board that came into view from
+    outside the image has nothing to show.
+    """
+    height, width = image.shape[:2]
+    # Grid points where cv2.resize puts the samples when scaling up by `step`
+    us, vs = np.meshgrid((np.arange(math.ceil(width / step)) + 0.5) * step - 0.5,
+                         (np.arange(math.ceil(height / step)) + 0.5) * step - 0.5)
+    grid = np.column_stack([us.ravel(), vs.ravel()])
+    board = cv2.perspectiveTransform(calibration.undistort(new, grid).reshape(-1, 1, 2),
+                                     np.asarray(new["homography"], dtype=np.float64))
+    source = calibration.distort(old, cv2.perspectiveTransform(
+        board, np.linalg.inv(np.asarray(old["homography"], dtype=np.float64))).reshape(-1, 2))
+    # The mapping is smooth: compute it on a coarse grid and scale it up
+    def full(values):
+        return cv2.resize(values.reshape(us.shape).astype(np.float32),
+                          (us.shape[1] * step, us.shape[0] * step))[:height, :width]
+    moved = cv2.remap(image, full(source[:, 0]), full(source[:, 1]), cv2.INTER_LINEAR,
+                      borderMode=cv2.BORDER_REPLICATE)
+    on_board = full(np.linalg.norm(board.reshape(-1, 2), axis=1)) <= BOARD_EDGE
+    map_u, map_v = full(source[:, 0]), full(source[:, 1])
+    m = EDGE_MARGIN_PX
+    inside = (map_u >= m) & (map_u <= width - 1 - m) & (map_v >= m) & (map_v <= height - 1 - m)
+    known = np.where(on_board & ~inside, 0, 255).astype(np.uint8)
+    known[:m, :] = known[-m:, :] = 0
+    known[:, :m] = known[:, -m:] = 0
+    if image.ndim == 3:
+        on_board = on_board[..., None]
+    return np.where(on_board, moved, image), known
 
 
 @dataclass

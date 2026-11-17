@@ -39,7 +39,8 @@ def rotation(angle_deg, dx=0.0, dy=0.0):
 def moved_view(image, model, movement):
     """
     The camera's image after the board moved by `movement` (board coordinates):
-    what was at board point b before is now at movement @ b.
+    what was at board point b before is now at movement @ b. Outside the board
+    edge nothing moves.
     """
     width, height = SIZE
     u, v = np.meshgrid(np.arange(width, dtype=np.float64), np.arange(height, dtype=np.float64))
@@ -49,8 +50,11 @@ def moved_view(image, model, movement):
     before = cv2.perspectiveTransform(board, np.linalg.inv(movement))
     source = calibration.distort(model, cv2.perspectiveTransform(before, np.linalg.inv(homography))
                                  .reshape(-1, 2)).astype(np.float32)
-    return cv2.remap(image, source[:, 0].reshape(height, width), source[:, 1].reshape(height, width),
-                     cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    moved = cv2.remap(image, source[:, 0].reshape(height, width), source[:, 1].reshape(height, width),
+                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    # Only the board turns; the wall and the LED ring around it stay
+    on_board = (np.linalg.norm(board.reshape(-1, 2), axis=1) <= tracking.BOARD_EDGE).reshape(height, width)
+    return np.where(on_board[..., None], moved, image)
 
 
 @pytest.fixture
@@ -133,3 +137,43 @@ def test_reference_points_move_with_the_board(tmp_path):
     expected = calibration.board_to_image(MODELS[CAMERA], *moved[:2])
     point = result.entry["points"][0]
     assert math.hypot(point["u"] - expected[0], point["v"] - expected[1]) < 1.0
+
+
+def test_remap_moves_an_image_along_with_the_board(entry, tmp_path):
+    movement = rotation(1.5, 0.01, 0.0)
+    moved = moved_view(BACKGROUND[CAMERA], MODELS[CAMERA], movement)
+    new = tracking.follow(entry, CAMERA, moved, tmp_path).entry
+    remapped, _ = tracking.remap(BACKGROUND[CAMERA], MODELS[CAMERA], new)
+    inside = tracking.board_region(new, SIZE, 0.9) > 0
+    before = np.abs(BACKGROUND[CAMERA].astype(int) - moved.astype(int))[inside].mean()
+    after = np.abs(remapped.astype(int) - moved.astype(int))[inside].mean()
+    assert after < before / 5
+
+
+def test_pulled_darts_after_the_board_turned_become_a_takeout(tmp_path):
+    from dart_scoring import detection  # pylint: disable=import-outside-toplevel
+    from test_detection import POSES  # pylint: disable=import-outside-toplevel
+    views = {c: textured_view(seed=10 + c) for c in POSES}
+    entries = {}
+    for c in POSES:
+        entries[c] = dict(MODELS[c])
+        tracking.set_reference(entries[c], c, views[c], tmp_path)
+    detector = detection.Detector(entries, SIZE)
+    detector.reset(views, 0.0)
+    detector.darts = 2                  # darts in the board
+
+    # The darts are pulled and the board turns 1.5 degrees on the way
+    movement = rotation(1.5)
+    turned = {c: moved_view(views[c], MODELS[c], movement) for c in POSES}
+    detector.moving = True
+    event = None
+    for i in range(detection.STILL_FRAMES + 1):
+        event = detector.feed(turned, 1.0 + 0.1 * i) or event
+    assert event.kind != "takeout"     # against the old empty board it doesn't look empty
+
+    new = {c: tracking.follow(entries[c], c, turned[c], tmp_path).entry for c in POSES}
+    assert all(e is not None for e in new.values())
+    detector.set_models(new, move_empty=True)
+    takeout = detector.check_takeout(turned)
+    assert takeout is not None and takeout.kind == "takeout"
+    assert detector.darts == 0

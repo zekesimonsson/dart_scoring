@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from dart_scoring import calibration
+from dart_scoring import calibration, tracking
 from dart_scoring.scoring import classify
 
 log = logging.getLogger(__name__)
@@ -44,6 +44,10 @@ SHIFT_PX = 2              # tolerated image shift (a camera shaking on impact)
 # pixels under the first darts, and automatic white balance can shift colours,
 # so that comparison tolerates more shift and evens out each colour channel.
 EMPTY_SHIFT_PX = 6
+# After the empty board was moved along with a turned board (tracking.remap),
+# wires and edges never line up perfectly: a camera counts as seeing the empty
+# board below this many changed pixels instead of MIN_DART_PIXELS
+MOVED_EMPTY_PIXELS = 600
 MIN_COMPONENT = 25        # ignore smaller specks
 MIN_DART_PIXELS = 150     # less than this in every camera: nothing happened
 MAX_DART_FRACTION = 0.10  # more than this of the frame: not a single dart (one right in
@@ -477,6 +481,7 @@ class Detector:
         self.reference = None      # camera -> blurred colour frame, after the last event
         self.reference_frames = None
         self.empty = None          # camera -> blurred colour frame of the board without darts
+        self.empty_known = {}      # camera -> mask of `empty` pixels still known after a board turn
         self.empty_change = 0      # changed pixels against `empty` after the last event
         self.leftover = False      # some camera still saw a change against `empty` at the last event
         self.previous_small = None
@@ -486,9 +491,23 @@ class Detector:
         self.darts = 0             # darts on the board since the last takeout
         self.last_dart = None      # (time, board point) of the last dart
 
-    def set_models(self, models: dict[int, dict]) -> None:
-        """Use new calibration models (e.g. after the board moved), keeping the frames."""
-        self.models = models
+    def set_models(self, models: dict[int, dict], move_empty: bool = False) -> None:
+        """
+        Use new calibration models (e.g. after the board moved). With
+        `move_empty`, the stored empty board was taken before the movement and
+        is moved along, so a takeout is still recognized afterwards.
+        """
+        old = getattr(self, "models", None)
+        if move_empty and old and getattr(self, "empty", None):
+            for cid, image in self.empty.items():
+                if models[cid] is old[cid]:
+                    continue
+                self.empty[cid], known = tracking.remap(image, old[cid], models[cid])
+                previous = self.empty_known.get(cid)
+                if previous is not None:  # what was unknown before stays unknown, moved along
+                    known = cv2.bitwise_and(known, tracking.remap(previous, old[cid], models[cid])[0])
+                self.empty_known[cid] = known
+        self.models = dict(models)
         self.masks = {cid: board_mask(model, self.image_size) for cid, model in models.items()}
         self.small_masks = {cid: cv2.resize(mask, SMALL_SIZE, interpolation=cv2.INTER_NEAREST) > 0
                             for cid, mask in self.masks.items()}
@@ -499,6 +518,7 @@ class Detector:
         self.reference = blurred
         self.reference_frames = dict(frames)
         self.empty = blurred
+        self.empty_known = {}
         self.empty_change = 0
         self.leftover = False
         self.previous_small = {cid: to_small(frame) for cid, frame in frames.items()}
@@ -548,6 +568,7 @@ class Detector:
             self.reference_frames = dict(frames)
             if not self._occupied():  # the empty board, as it looks now
                 self.empty = blurred
+                self.empty_known = {}
                 self.empty_change = 0
                 self.leftover = False
 
@@ -558,15 +579,46 @@ class Detector:
         """
         return self.darts > 0 or self.leftover
 
+    def _empty_mask(self, cid: int) -> np.ndarray:
+        known = self.empty_known.get(cid)
+        return self.masks[cid] if known is None else cv2.bitwise_and(self.masks[cid], known)
+
+    def _against_empty(self, blurred: dict) -> tuple[list[int], bool]:
+        """Changed pixels per camera against the empty board, and whether it looks empty."""
+        counts = [cv2.countNonZero(empty_change_mask(self.empty[cid], g, self._empty_mask(cid)))
+                  for cid, g in blurred.items()]
+        quiet = sum(n < (MOVED_EMPTY_PIXELS if cid in self.empty_known else MIN_DART_PIXELS)
+                    for cid, n in zip(blurred, counts))
+        return counts, quiet >= min(EMPTY_VOTES, len(blurred))
+
+    def check_takeout(self, frames: dict) -> Event | None:
+        """
+        A takeout event if something was in the board and these (settled)
+        frames look like the empty board, e.g. right after the empty board was
+        moved along with a turned board. Otherwise None.
+        """
+        blurred = {cid: to_blurred(frame) for cid, frame in frames.items()}
+        counts, looks_empty = self._against_empty(blurred)
+        if not (self._occupied() and looks_empty):
+            return None
+        event = Event("takeout", changed=dict(zip(blurred, counts)),
+                      before=self.reference_frames, after=dict(frames))
+        self.darts = 0
+        self.empty = blurred
+        self.empty_known = {}
+        self.reference = blurred
+        self.reference_frames = dict(frames)
+        self.empty_change = sum(counts)
+        self.leftover = False
+        return event
+
     def evaluate(self, frames: dict) -> Event:
         """Compare settled frames with the reference and classify what happened."""
         blurred = {cid: to_blurred(frame) for cid, frame in frames.items()}
         changes = {cid: change_mask(self.reference[cid], g, self.masks[cid]) for cid, g in blurred.items()}
         changed = {cid: cv2.countNonZero(c) for cid, c in changes.items()}
-        empty_counts = [cv2.countNonZero(empty_change_mask(self.empty[cid], g, self.masks[cid]))
-                        for cid, g in blurred.items()]
+        empty_counts, looks_empty = self._against_empty(blurred)
         empty_change = sum(empty_counts)
-        looks_empty = sum(n < MIN_DART_PIXELS for n in empty_counts) >= min(EMPTY_VOTES, len(blurred))
         event = Event("unclear", changed=changed, before=self.reference_frames, after=dict(frames))
 
         def accept(kind: str) -> Event:
@@ -583,6 +635,7 @@ class Detector:
         if self._occupied() and looks_empty:
             self.darts = 0
             self.empty = blurred
+            self.empty_known = {}
             return accept("takeout")
         # Fewer changes against the empty board than before: a dart was pulled out
         if self.darts and empty_change < self.empty_change - sum(changed.values()) / 2:
