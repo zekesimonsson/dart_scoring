@@ -24,7 +24,7 @@ Tre program körs:
 
 | Fil | Vad den gör |
 |---|---|
-| `camera.py` | `CameraManager` öppnar de tre kamerorna via fasta sökvägar under `/dev/v4l/by-path/` (`CAMERA_PATHS`), så kamera-id 1–3 är knutna till USB-hubbens portar 2–4, inte till `/dev/videoN`. `configure()` ställer in MJPG 1280×720 i 30 bilder/s, manuell exponering 20 ms (`EXPOSURE = 200` i enheter om 100 µs, en multipel av 10 ms mot LED-flimmer på 50 Hz), förstärkning 0 och fast vitbalans 3050 K (`WB_TEMPERATURE`). Automatisk vitbalans flyttade färgerna i en hel kamerabild under spel, så att den tomma tavlan inte kändes igen. `capture()` anropar först `grab()` på alla kameror och sedan `retrieve()`, så att de tre bilderna tas så samtidigt som möjligt. |
+| `camera.py` | `CameraManager` öppnar de tre kamerorna via fasta sökvägar under `/dev/v4l/by-path/` (`CAMERA_PATHS`), så kamera-id 1–3 är knutna till Pi:ns USB-portar 1.1, 1.3 och 1.4 (kamerorna sitter direkt i Pi:n, utan hubb), inte till `/dev/videoN`. `configure()` ställer in MJPG 1280×720 i 30 bilder/s, manuell exponering 20 ms (`EXPOSURE = 200` i enheter om 100 µs, en multipel av 10 ms mot LED-flimmer på 50 Hz), förstärkning 0 och fast vitbalans 3050 K (`WB_TEMPERATURE`). Automatisk vitbalans flyttade färgerna i en hel kamerabild under spel, så att den tomma tavlan inte kändes igen. `capture()` anropar först `grab()` på alla kameror och sedan `retrieve()`, så att de tre bilderna tas så samtidigt som möjligt. |
 | `calibration.py` | Kameramodell per kamera: bildpixel → normaliserade tavelkoordinater. Passning från klickade referenspunkter (linsdistorsion + homografi), avbildning åt båda hållen (`image_to_board`, `board_to_image`), ritning av tavlan över en bild, hitta felklickade punkter (`find_suspects`), läsa/skriva `calibration.json`. |
 | `calibration_web.py` + `static/calibrate.html` | Webbgränssnittet för kalibreringen: tar bilder från kamerorna, visar live-MJPEG (640×360), tar emot klickade punkter, passar modellen och sparar. Bilden som punkterna klickades på sparas som referensbild i `calibration_ref/cam<N>.jpg`, tillsammans med modellen i det ögonblicket. |
 | `tracking.py` | Följer tavlan efter kalibreringen (avsnitt 4.4): jämför en bild av tavlan med referensbilden, räknar ut hur tavlan har vridits eller flyttats och ger en uppdaterad modell. `remap()` flyttar en bild med tavlan. |
@@ -266,7 +266,7 @@ Loggfiler roteras vid 1 MB med 3 säkerhetskopior.
 
 | Parameter | Värde |
 |---|---|
-| `CAMERA_PATHS` | USB-sökväg per kamera-id (hubbens portar 1.1.2, 1.1.3, 1.1.4) |
+| `CAMERA_PATHS` | USB-sökväg per kamera-id (Pi:ns portar 1.1, 1.3, 1.4) |
 | Format | MJPG, 1280×720, 30 bilder/s |
 | `EXPOSURE` | 200 (= 20 ms), manuell; förstärkning 0 |
 | `WB_TEMPERATURE` | 3050 K, fast vitbalans (tavlans vita fält blir neutrala under LED-ringen) |
