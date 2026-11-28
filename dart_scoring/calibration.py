@@ -29,21 +29,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from dart_scoring.scoring import SEGMENTS
+from dart_scoring.scoring import BOARD_RADIUS_MM, RING_EDGES_MM, SEGMENTS
 
 CALIBRATION_FILE = Path(__file__).resolve().parent.parent / "calibration.json"
 
-BOARD_RADIUS_MM = 170
 
-# Ring edges (where the ring wires are), as normalized radii
-RINGS = {
-    "double_outer": 1.0,
-    "double_inner": 162 / 170,
-    "triple_outer": 107 / 170,
-    "triple_inner": 99 / 170,
-    "bull_outer": 15.9 / 170,
-    "bull_inner": 6.35 / 170,
-}
+# Ring edges as clicked (the outer edges of the ring wires), as normalized radii
+RINGS = {ring: mm / BOARD_RADIUS_MM for ring, mm in RING_EDGES_MM.items()}
 
 MIN_POINTS = 4
 # Fewer points than this give an unstable distortion estimate: fit a plain homography

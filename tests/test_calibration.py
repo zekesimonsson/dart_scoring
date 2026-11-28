@@ -43,8 +43,9 @@ def test_boundary_zero_is_between_20_and_1():
     assert boundary_label(0) == "20/1"
     assert boundary_label(19) == "5/20"
     x, y = reference_point("double_outer", 0)
-    assert x == pytest.approx(math.sin(math.radians(9)))
-    assert y == pytest.approx(-math.cos(math.radians(9)))
+    radius = RINGS["double_outer"]
+    assert x == pytest.approx(radius * math.sin(math.radians(9)))
+    assert y == pytest.approx(-radius * math.cos(math.radians(9)))
 
 
 def test_reference_points_lie_on_the_segment_boundary():

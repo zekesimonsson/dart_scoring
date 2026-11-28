@@ -6,13 +6,10 @@ import math
 
 import pytest
 
-from dart_scoring.scoring import SEGMENTS, calculate_score
-
-BULL_R = 6.35 / 170
-OUTER_BULL_R = 15.9 / 170
-TRIPLE_INNER_R = 99 / 170
-TRIPLE_OUTER_R = 107 / 170
-DOUBLE_INNER_R = 162 / 170
+from dart_scoring.scoring import (BULL_RADIUS as BULL_R, DOUBLE_INNER as DOUBLE_INNER_R,
+                                  DOUBLE_OUTER as DOUBLE_OUTER_R, OUTER_BULL_RADIUS as OUTER_BULL_R,
+                                  RING_EDGES_MM, SEGMENTS, TRIPLE_INNER as TRIPLE_INNER_R,
+                                  TRIPLE_OUTER as TRIPLE_OUTER_R, WIRE_MM, calculate_score)
 
 
 def polar(radius: float, angle_deg: float) -> tuple[float, float]:
@@ -64,7 +61,7 @@ def test_segment_centers_triple(index, number):
 
 @pytest.mark.parametrize("index, number", list(enumerate(SEGMENTS)))
 def test_segment_centers_double(index, number):
-    assert score_at((DOUBLE_INNER_R + 1.0) / 2, index * 18) == number * 2
+    assert score_at((DOUBLE_INNER_R + DOUBLE_OUTER_R) / 2, index * 18) == number * 2
 
 
 @pytest.mark.parametrize(
@@ -106,7 +103,7 @@ def test_just_outside_triple_ring_is_single():
 
 def test_double_ring_edges_inclusive():
     assert calculate_score(0.0, -DOUBLE_INNER_R) == 40
-    assert calculate_score(0.0, -1.0) == 40
+    assert calculate_score(0.0, -DOUBLE_OUTER_R) == 40
 
 
 def test_just_inside_double_ring_is_single():
@@ -115,6 +112,25 @@ def test_just_inside_double_ring_is_single():
 
 # --- Misses -------------------------------------------------------------
 
-@pytest.mark.parametrize("x, y", [(0.0, -1.000001), (1.1, 0.0), (-0.8, 0.8), (5.0, 5.0)])
+@pytest.mark.parametrize("x, y", [(0.0, -(DOUBLE_OUTER_R + 1e-6)), (1.1, 0.0), (-0.8, 0.8),
+                                  (5.0, 5.0)])
 def test_outside_board_is_miss(x, y):
     assert calculate_score(x, y) == 0
+
+
+# --- This board's wires -----------------------------------------------------
+
+def test_boundaries_are_the_middle_of_the_wires():
+    # Clicked edges are the wires' outer edges; a dart counts by the wire's middle
+    half = WIRE_MM / 2 / 170
+    assert TRIPLE_OUTER_R == pytest.approx(RING_EDGES_MM["triple_outer"] / 170 - half)
+    assert TRIPLE_INNER_R == pytest.approx(RING_EDGES_MM["triple_inner"] / 170 + half)
+    assert DOUBLE_INNER_R == pytest.approx(RING_EDGES_MM["double_inner"] / 170 + half)
+    assert DOUBLE_OUTER_R == pytest.approx(RING_EDGES_MM["double_outer"] / 170 - half)
+    assert OUTER_BULL_R == pytest.approx(RING_EDGES_MM["bull_outer"] / 170 - half)
+    assert BULL_R == pytest.approx(RING_EDGES_MM["bull_inner"] / 170 - half)
+
+
+def test_dart_a_millimetre_outside_the_nominal_triple_is_still_a_triple():
+    # 107 mm was the nominal outer edge; on this board's wires 107.0 mm is inside
+    assert score_at(107.0 / 170, 27.0) == 54   # T18

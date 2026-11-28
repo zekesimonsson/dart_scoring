@@ -151,15 +151,17 @@ Resultatet förkastas (händelsen blir oklar) om:
 
 ### 3.5 Från position till sektor och poäng (`scoring.classify`)
 
-Med r = avståndet från mitten (normaliserat, ringmått i mm / 170):
+Ringmåtten är den här tavlans, inte standardmåtten. `RING_EDGES_MM` i `scoring.py` anger trådarnas ytterkanter, där kalibreringspunkterna klickas: dubbel 161,0–171,3 mm, trippel 97,5–107,6 mm, yttre bull 16,9 mm och bullseye 7,1 mm. Måtten är uppmätta från alla tre kamerornas kalibreringspunkter. Med trådarna är ringarna ungefär 10 mm breda i stället för standardens 8 mm (99–107 och 162–170 mm mellan trådarna). När kalibreringen anpassades till standardmåtten hamnade trådarna ungefär 1 mm fel, så trippelpilar nära tråden blev singel. `calibration.RINGS` byggs från samma mått. En pil räknas efter vilken sida av trådens mitt den sitter på, alltså `WIRE_MM / 2` (0,5 mm) innanför de klickade kanterna.
+
+Med r = avståndet från mitten i mm (normaliserat r × 170):
 
 | Villkor | Resultat |
 |---|---|
-| r > 1,0 | Miss (0, 0) |
-| r ≤ 6,35/170 | Bullseye (25, ×2) = 50 |
-| r ≤ 15,9/170 | Yttre bull (25, ×1) = 25 |
-| 99/170 ≤ r ≤ 107/170 | Trippel |
-| 162/170 ≤ r ≤ 1,0 | Dubbel |
+| r > 170,8 | Miss (0, 0) |
+| r ≤ 6,6 | Bullseye (25, ×2) = 50 |
+| r ≤ 16,4 | Yttre bull (25, ×1) = 25 |
+| 98,0 ≤ r ≤ 107,1 | Trippel |
+| 161,5 ≤ r ≤ 170,8 | Dubbel |
 | annars | Singel |
 
 Sektorn: vinkeln medurs från 20, `atan2(x, −y)` i grader, ger index `⌊(vinkel + 9) / 18⌋ mod 20` i `SEGMENTS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5]`. Poängen är sektor × multiplikator.
@@ -277,7 +279,8 @@ Loggfiler roteras vid 1 MB med 3 säkerhetskopior.
 | Parameter | Värde | Betydelse |
 |---|---|---|
 | `BOARD_RADIUS_MM` | 170 | Normaliseringsradie |
-| `RINGS` | 170, 162, 107, 99, 15,9, 6,35 mm (/170) | Ringkanter |
+| `RING_EDGES_MM` (`scoring.py`) | 171,3, 161,0, 107,6, 97,5, 16,9, 7,1 mm | Trådarnas ytterkanter på den här tavlan; `calibration.RINGS` = dessa / 170 |
+| `WIRE_MM` | 1,0 | Trådens bredd; poängen räknas från trådens mitt |
 | `MIN_POINTS` | 4 | Minsta antal punkter för en modell |
 | `MIN_DISTORTION_POINTS` | 12 | Från detta antal skattas linsdistorsion |
 | `SUSPECT_PX`, `SUSPECT_FACTOR` | 20 px, 3 | Gräns för misstänkt felklick |

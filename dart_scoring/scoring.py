@@ -2,6 +2,40 @@
 
 import math
 
+BOARD_RADIUS_MM = 170   # normalized radius 1.0
+
+# The ring wires on this board, in mm from the middle of the bull: the outer
+# edges of each ring's wires, which is where the calibration points are
+# clicked. Measured over all three cameras' calibration points (Winmau Blade 6):
+# with their wires the rings are about 10 mm wide, not the nominal 8 mm
+# (99-107 and 162-170 mm) between the wires, and fitting the calibration to the
+# nominal sizes put the wires about 1 mm off.
+RING_EDGES_MM = {
+    "double_outer": 171.3,
+    "double_inner": 161.0,
+    "triple_outer": 107.6,
+    "triple_inner": 97.5,
+    "bull_outer": 16.9,
+    "bull_inner": 7.1,
+}
+# A dart scores by which side of a wire's middle it is on: half a wire inside
+# the clicked edges
+WIRE_MM = 1.0
+
+
+def _wire_middle(ring: str) -> float:
+    """Normalized radius of the middle of a ring's wire (`_inner` edges lie outside it)."""
+    inward = -1 if ring.endswith("_inner") and not ring.startswith("bull") else 1
+    return (RING_EDGES_MM[ring] - inward * WIRE_MM / 2) / BOARD_RADIUS_MM
+
+
+BULL_RADIUS = _wire_middle("bull_inner")
+OUTER_BULL_RADIUS = _wire_middle("bull_outer")
+TRIPLE_INNER = _wire_middle("triple_inner")
+TRIPLE_OUTER = _wire_middle("triple_outer")
+DOUBLE_INNER = _wire_middle("double_inner")
+DOUBLE_OUTER = _wire_middle("double_outer")
+
 # Clockwise order, starting at the top
 SEGMENTS = [
     20, 1, 18, 4, 13,
@@ -20,21 +54,22 @@ def classify(x: float, y: float) -> tuple[int, int]:
 
     (0, 0) = board center
     (0, -1) = top of double ring
-    Radius 1.0 = outer edge of double ring
+    Radius 1.0 = 170 mm, the nominal outer edge of the double ring; the
+    ring boundaries are the wires of this board (RING_EDGES_MM)
     """
 
     radius = math.hypot(x, y)
 
     # Outside scoring area
-    if radius > 1.0:
+    if radius > DOUBLE_OUTER:
         return 0, 0
 
     # Bullseye
-    if radius <= 6.35 / 170:
+    if radius <= BULL_RADIUS:
         return 25, 2
 
     # Outer bull
-    if radius <= 15.9 / 170:
+    if radius <= OUTER_BULL_RADIUS:
         return 25, 1
 
     # Determine segment
@@ -45,11 +80,11 @@ def classify(x: float, y: float) -> tuple[int, int]:
     segment = SEGMENTS[index]
 
     # Triple ring
-    if 99 / 170 <= radius <= 107 / 170:
+    if TRIPLE_INNER <= radius <= TRIPLE_OUTER:
         return segment, 3
 
     # Double ring
-    if 162 / 170 <= radius <= 1.0:
+    if DOUBLE_INNER <= radius:
         return segment, 2
 
     return segment, 1
