@@ -92,8 +92,12 @@ MAX_RADIUS = 1.35         # the edge of the board (451 mm); a dart further out c
 # A position from visible tips alone (no line intersection) outside the double
 # ring is not trusted: a hand or arm at the edge of a camera's view looks like
 # that, and would cost the player a dart as a miss. A real dart there scores
-# nothing anyway, and the takeout fills the turn up with misses.
+# nothing anyway, and the takeout fills the turn up with misses. A hand is seen
+# by one camera only, though: when at least two cameras put their visible tip
+# within TIP_AGREE_MM of the position, it is a dart (e.g. just outside the
+# double ring, where the lines from neighbouring cameras are nearly parallel).
 MAX_TIP_ONLY_RADIUS = 1.0
+TIP_AGREE_MM = 5
 # A dart found this soon after the previous one and this close to it is the
 # same dart still settling (it wobbles after impact), not a new throw
 DUPLICATE_SECONDS = 1.5
@@ -441,6 +445,12 @@ def best_tip(lines: list[BoardLine]) -> np.ndarray:
     return points[int(np.argmin(cost))]
 
 
+def tips_agreeing(lines: list[BoardLine], point: np.ndarray) -> int:
+    """How many cameras see their visible dart tip within TIP_AGREE_MM of `point`."""
+    return sum(np.linalg.norm(line.point - point) * calibration.BOARD_RADIUS_MM <= TIP_AGREE_MM
+               for line in lines)
+
+
 def _spread(lines: list[BoardLine]) -> float:
     return max(_angle(a, b) for i, a in enumerate(lines) for b in lines[i + 1:])
 
@@ -664,7 +674,8 @@ class Detector:
         radius = np.linalg.norm(point)
         if radius > MAX_RADIUS:
             return accept("unclear")  # nothing sticks out there
-        if method.startswith("spets") and radius > MAX_TIP_ONLY_RADIUS:
+        if (method.startswith("spets") and radius > MAX_TIP_ONLY_RADIUS
+                and tips_agreeing(lines, point) < 2):
             return accept("unclear")
         now = self.last_event_time
         if (self.last_dart is not None and now - self.last_dart[0] < DUPLICATE_SECONDS

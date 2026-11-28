@@ -455,6 +455,28 @@ def test_tip_only_position_outside_the_double_ring_is_unclear():
     assert detector.darts == 0
 
 
+def test_tip_only_position_outside_the_double_ring_seen_by_two_cameras_is_a_dart(monkeypatch):
+    # Neighbouring cameras' lines can be nearly parallel just outside the double
+    # ring, so only the tips place it; two cameras agreeing there is no hand
+    detector = new_detector()
+    outside = np.array([0.6, 0.81])
+    monkeypatch.setattr(detection, "locate", lambda lines: (outside, "spets 1+2"))
+    event = settle(detector, render([(0.6, 0.81, (0, 0), 0.0)]), 1.0)
+    assert detection.tips_agreeing(event.lines, outside) >= 2
+    assert event.kind == "dart"
+    assert event.segment == 0                 # outside the double ring: a miss
+
+
+def test_tips_agreeing_counts_cameras_close_to_the_position():
+    point = np.array([0.6, 0.8])
+    near = 3 / detection.calibration.BOARD_RADIUS_MM
+    lines = [detection.BoardLine(1, point + [near, 0], np.array([1.0, 0.0])),
+             detection.BoardLine(2, point - [0, near], np.array([0.0, 1.0])),
+             detection.BoardLine(3, point + [0.2, 0], np.array([0.0, 1.0]))]
+    assert detection.tips_agreeing(lines, point) == 2
+    assert detection.tips_agreeing(lines[:1] + lines[2:], point) == 1
+
+
 def test_tip_only_position_inside_the_board_is_a_dart():
     detector = new_detector()
     event = settle(detector, only_seen_by(1, render([(0.2, -0.5, (0, 0), 0.0)])), 1.0)

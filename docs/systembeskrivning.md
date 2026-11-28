@@ -145,7 +145,7 @@ I alla skärningar drar dessutom varje kameras synliga spets svagt i punkten: en
 Resultatet förkastas (händelsen blir oklar) om:
 
 - det ligger längre än 1,35 radier (230 mm, `MAX_RADIUS`) från mitten; där kan ingen pil sitta;
-- det bygger bara på synliga spetsar (metod "spets …") och ligger utanför dubbelringen (`MAX_TIP_ONLY_RADIUS = 1,0`). En hand i kanten av en kameras bild ser ut så och skulle annars kosta spelaren en pil som miss; en riktig pil där ger ändå inga poäng, och utdragningen fyller turen med missar.
+- det bygger bara på synliga spetsar (metod "spets …") och ligger utanför dubbelringen (`MAX_TIP_ONLY_RADIUS = 1,0`), utom när minst två kameror ser sin spets inom `TIP_AGREE_MM` (5 mm) från positionen. En hand syns bara i en kamera; två kameror som är överens är en pil, t.ex. strax utanför dubbelringen där grannkamerornas linjer är nästan parallella. En hand i kanten av en kameras bild ser ut så och skulle annars kosta spelaren en pil som miss; en riktig pil där ger ändå inga poäng, och utdragningen fyller turen med missar.
 
 **Känd begränsning:** en pil som sitter nära linjen mellan två kameror (t.ex. längst ner mellan kamera 1 klockan 8 och kamera 2 klockan 4) ger två nästan parallella linjer. Då måste den tredje kameran se pilen för att positionen ska bli säker.
 
@@ -326,7 +326,8 @@ Loggfiler roteras vid 1 MB med 3 säkerhetskopior.
 | `TIP_WEIGHT`, `TIP_REFERENCE_MM_PER_PX` | 0,02, 0,5 | Hur mycket synliga spetsar drar i skärningen |
 | `SHARP_TIP_ANGLE`, `SHARP_TIP_RATIO` | 20°, 3 | Skarp-spets-regeln |
 | `MAX_RADIUS` | 1,35 | Längst ut en pil kan sitta |
-| `MAX_TIP_ONLY_RADIUS` | 1,0 | Längst ut en position från bara synliga spetsar godtas |
+| `MAX_TIP_ONLY_RADIUS` | 1,0 | Längst ut en position från bara synliga spetsar godtas (om inte två kameror är överens) |
+| `TIP_AGREE_MM` | 5 | Så nära positionen två kamerors spetsar ska ligga för att godtas utanför dubbelringen |
 | `DUPLICATE_SECONDS`, `DUPLICATE_MM` | 1,5 s, 15 mm | Samma pil som sätter sig |
 | `REFRESH_SECONDS` | 10 s | Uppdatering av referens vid stillhet |
 
